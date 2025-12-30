@@ -12,7 +12,7 @@ import {
   AlertCircle,
   Database,
   Settings,
-  Sync,
+  RefreshCw,
   Cloud
 } from 'lucide-react';
 
@@ -214,7 +214,7 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
               
               {syncStatus.lastSync && (
                 <div className="flex items-center gap-2 text-sm text-zinc-500">
-                  <Sync className="w-4 h-4" />
+                  <RefreshCw className="w-4 h-4" />
                   <span>最后同步: {syncStatus.lastSync.toLocaleString()}</span>
                 </div>
               )}

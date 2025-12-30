@@ -133,7 +133,7 @@ class DatabaseStorageService {
       return result;
     } catch (error) {
       console.error('初始化数据库表失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -161,7 +161,7 @@ class DatabaseStorageService {
       return result;
     } catch (error) {
       console.error('保存图片到数据库失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -190,7 +190,7 @@ class DatabaseStorageService {
       return result;
     } catch (error) {
       console.error('从数据库获取图片失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -219,7 +219,7 @@ class DatabaseStorageService {
       return result;
     } catch (error) {
       console.error('更新图片失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -247,7 +247,7 @@ class DatabaseStorageService {
       return result;
     } catch (error) {
       console.error('删除图片失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -278,7 +278,7 @@ class DatabaseStorageService {
     } catch (error) {
       this.syncStatus.pendingUploads = 0;
       console.error('同步到云端失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -307,7 +307,7 @@ class DatabaseStorageService {
       return result;
     } catch (error) {
       console.error('从云端同步失败:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -434,7 +434,7 @@ export const saveDatabaseConfig = (config: DatabaseConfig): void => {
 export const clearDatabaseConfig = (): void => {
   try {
     localStorage.removeItem('database-config');
-    databaseStorage.setConfig(null);
+    databaseStorage.setConfig(undefined as any);
   } catch (error) {
     console.error('清除数据库配置失败:', error);
   }

@@ -114,3 +114,180 @@ export interface DatabaseConfig {
   ssl?: boolean;                    // 是否使用 SSL
   enabled: boolean;                 // 是否启用数据库同步
 }
+
+// OSS 配置信息
+export interface OSSConfig {
+  accessKeyId: string;              // 访问密钥 ID
+  accessKeySecret: string;          // 访问密钥 Secret
+  region: string;                   // 地域
+  bucket: string;                   // 存储桶名称
+  endpoint?: string;                // 自定义域名
+  secure?: boolean;                 // 是否使用 HTTPS
+  pathStyle?: boolean;              // 是否使用路径样式
+  enabled: boolean;                 // 是否启用 OSS 存储
+}
+
+// 数据库连接状态
+export interface ConnectionStatus {
+  isConnected: boolean;             // 是否已连接
+  lastConnected: Date | null;       // 最后连接时间
+  error: string | null;             // 错误信息
+  latency?: number;                 // 连接延迟（毫秒）
+}
+
+// 分页选项
+export interface PaginationOptions {
+  page: number;                     // 页码（从1开始）
+  pageSize: number;                 // 每页大小
+  sortBy?: string;                  // 排序字段
+  sortOrder?: 'ASC' | 'DESC';       // 排序方向
+  filters?: Record<string, any>;    // 筛选条件
+}
+
+// 分页结果
+export interface PaginatedResult<T> {
+  data: T[];                        // 数据列表
+  total: number;                    // 总记录数
+  page: number;                     // 当前页码
+  pageSize: number;                 // 每页大小
+  totalPages: number;               // 总页数
+  hasNext: boolean;                 // 是否有下一页
+  hasPrev: boolean;                 // 是否有上一页
+}
+
+// 云函数调用结果
+export interface CloudFunctionResult<T = any> {
+  success: boolean;                 // 是否成功
+  data?: T;                         // 返回数据
+  error?: string;                   // 错误信息
+  message?: string;                 // 消息
+  code?: number;                    // 错误代码
+}
+
+// 数据库操作日志
+export interface OperationLog {
+  id: string;                       // 日志ID
+  operation: string;                // 操作类型（INSERT, UPDATE, DELETE, SELECT）
+  tableName: string;                // 表名
+  recordId?: string;                // 记录ID
+  userId: string;                   // 用户ID
+  status: 'SUCCESS' | 'FAILED';     // 操作状态
+  errorMessage?: string;            // 错误信息
+  createdAt: Date;                  // 创建时间
+  duration?: number;                // 操作耗时（毫秒）
+}
+
+// 数据库错误类型
+export interface DatabaseError extends Error {
+  code: string;                     // 错误代码
+  sqlState?: string;                // SQL状态码
+  errno?: number;                   // 错误号
+  sql?: string;                     // 执行的SQL语句
+}
+
+// 加密服务接口
+export interface EncryptionService {
+  encrypt(data: string, key?: string): string;
+  decrypt(encryptedData: string, key?: string): string;
+  generateKey(): string;
+  hashPassword(password: string): string;
+  verifyPassword(password: string, hash: string): boolean;
+}
+
+// 数据库服务接口
+export interface DatabaseService {
+  // 连接管理
+  connect(config: DatabaseConfig): Promise<boolean>;
+  disconnect(): Promise<void>;
+  testConnection(): Promise<boolean>;
+  getConnectionStatus(): ConnectionStatus;
+  
+  // 图片数据操作
+  saveImage(image: SavedImage): Promise<SavedImage>;
+  getImages(pagination: PaginationOptions): Promise<PaginatedResult<SavedImage>>;
+  updateImage(id: string, updates: Partial<SavedImage>): Promise<SavedImage>;
+  deleteImage(id: string, cascadeDelete?: boolean): Promise<void>;
+  deleteImages(ids: string[], cascadeDelete?: boolean): Promise<{ 
+    successful: string[], 
+    failed: { id: string, error: string }[] 
+  }>;
+  
+  // 配置管理
+  saveApiConfig(config: ApiConfig): Promise<void>;
+  getApiConfig(): Promise<ApiConfig | null>;
+  saveOSSConfig(config: OSSConfig): Promise<void>;
+  getOSSConfig(): Promise<OSSConfig | null>;
+  deleteApiConfig(requireConfirmation?: boolean): Promise<void>;
+  deleteOSSConfig(requireConfirmation?: boolean): Promise<void>;
+  deleteAllConfigs(requireConfirmation?: boolean): Promise<void>;
+  clearUserData(requireConfirmation?: boolean): Promise<void>;
+  
+  // 表结构管理
+  initializeTables(): Promise<void>;
+  migrateSchema(version: string): Promise<void>;
+}
+
+// 云函数API接口
+export interface CloudFunctionAPI {
+  callFunction<T>(functionName: string, params: any): Promise<CloudFunctionResult<T>>;
+  
+  // 具体函数调用
+  testConnection(config: DatabaseConfig): Promise<boolean>;
+  initTables(config: DatabaseConfig): Promise<void>;
+  saveImage(config: DatabaseConfig, image: SavedImage): Promise<SavedImage>;
+  getImages(config: DatabaseConfig, pagination: PaginationOptions): Promise<SavedImage[]>;
+  updateImage(config: DatabaseConfig, id: string, updates: Partial<SavedImage>): Promise<void>;
+  deleteImage(config: DatabaseConfig, id: string): Promise<void>;
+  saveConfig(config: DatabaseConfig, type: 'api' | 'oss', data: any): Promise<void>;
+  getConfig(config: DatabaseConfig, type: 'api' | 'oss'): Promise<any>;
+}
+
+// 网络错误处理器
+export interface NetworkErrorHandler {
+  executeWithRetry<T>(operation: () => Promise<T>): Promise<T>;
+  shouldRetry(error: any): boolean;
+}
+
+// 数据库错误处理器
+export interface DatabaseErrorHandler {
+  handleError(error: any, context?: {
+    operation?: string;
+    tableName?: string;
+    recordId?: string;
+    sql?: string;
+  }): DatabaseError;
+  isRetryable(error: any): boolean;
+  getSuggestions(error: any): string[];
+  formatUserMessage(error: any): string;
+  getErrorLog(limit?: number): OperationLog[];
+  clearErrorLog(): void;
+  getErrorStats(): {
+    total: number;
+    byType: Record<string, number>;
+    byCode: Record<string, number>;
+    recent: number;
+  };
+}
+
+// 环境变量类型
+export interface EnvironmentConfig {
+  // API 配置
+  API_KEY?: string;
+  API_BASE_URL?: string;
+  
+  // 数据库配置
+  DB_HOST?: string;
+  DB_PORT?: string;
+  DB_DATABASE?: string;
+  DB_USERNAME?: string;
+  DB_PASSWORD?: string;
+  DB_SSL?: string;
+  
+  // 加密配置
+  ENCRYPTION_KEY?: string;
+  
+  // 云函数配置
+  FC_ENDPOINT?: string;
+  FC_ACCESS_KEY_ID?: string;
+  FC_ACCESS_KEY_SECRET?: string;
+}

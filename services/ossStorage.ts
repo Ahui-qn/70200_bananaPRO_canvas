@@ -289,7 +289,7 @@ export const saveOSSConfig = (config: OSSConfig): void => {
 export const clearOSSConfig = (): void => {
   try {
     localStorage.removeItem('oss-config');
-    ossStorage.setConfig(null);
+    ossStorage.setConfig(undefined as any);
   } catch (error) {
     console.error('清除 OSS 配置失败:', error);
   }

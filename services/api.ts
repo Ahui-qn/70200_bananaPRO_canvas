@@ -5,6 +5,7 @@ import {
   NanoBananaResultResponse,
   ApiConfig
 } from '../types';
+import { fetchWithNetworkRetry } from './networkErrorHandler';
 
 // 获取请求头的辅助函数
 const getHeaders = (apiKey: string) => {
@@ -15,36 +16,6 @@ const getHeaders = (apiKey: string) => {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey.trim()}`
   };
-};
-
-// 带重试的 fetch 函数
-const fetchWithRetry = async (
-  url: string, 
-  options: RequestInit, 
-  retryCount: number = 3,
-  timeout: number = 30000
-): Promise<Response> => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    
-    if (retryCount > 0 && (error as Error).name !== 'AbortError') {
-      console.warn(`请求失败，剩余重试次数: ${retryCount - 1}`);
-      await new Promise(resolve => setTimeout(resolve, 1000)); // 等待1秒后重试
-      return fetchWithRetry(url, options, retryCount - 1, timeout);
-    }
-    
-    throw error;
-  }
 };
 
 /**
@@ -60,26 +31,18 @@ export const createDrawingTask = async (
   };
 
   try {
-    const response = await fetchWithRetry(
+    const response = await fetchWithNetworkRetry(
       `${config.baseUrl}/nano-banana`,
       {
         method: 'POST',
         headers: getHeaders(config.apiKey),
         body: JSON.stringify(payload),
       },
-      config.retryCount,
-      config.timeout
+      {
+        maxRetries: config.retryCount,
+        timeout: config.timeout
+      }
     );
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('API Key 无效，请检查配置');
-      }
-      if (response.status === 404) {
-        throw new Error('API 接口地址无效，请检查配置');
-      }
-      throw new Error(`创建任务失败: ${response.status} ${response.statusText}`);
-    }
 
     const data: NanoBananaCreateResponse = await response.json();
     
@@ -91,9 +54,6 @@ export const createDrawingTask = async (
     return data.data.id;
   } catch (error) {
     console.error('API 创建错误:', error);
-    if ((error as Error).name === 'AbortError') {
-      throw new Error(`请求超时 (${config.timeout / 1000}秒)，请检查网络连接`);
-    }
     throw error;
   }
 };
@@ -110,34 +70,23 @@ export const getTaskResult = async (
   };
 
   try {
-    const response = await fetchWithRetry(
+    const response = await fetchWithNetworkRetry(
       `${config.baseUrl}/result`,
       {
         method: 'POST',
         headers: getHeaders(config.apiKey),
         body: JSON.stringify(payload),
       },
-      config.retryCount,
-      config.timeout
+      {
+        maxRetries: config.retryCount,
+        timeout: config.timeout
+      }
     );
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('API Key 无效，请检查配置');
-      }
-      if (response.status === 404) {
-        throw new Error('API 接口地址无效，请检查配置');
-      }
-      throw new Error(`获取结果失败: ${response.status} ${response.statusText}`);
-    }
 
     const data: NanoBananaResultResponse = await response.json();
     return data;
   } catch (error) {
     console.error('API 结果错误:', error);
-    if ((error as Error).name === 'AbortError') {
-      throw new Error(`请求超时 (${config.timeout / 1000}秒)，请检查网络连接`);
-    }
     throw error;
   }
 };
