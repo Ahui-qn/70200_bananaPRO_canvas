@@ -12,6 +12,7 @@ import { ApiConfigModal } from './components/ApiConfigModal';
 import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 import { OSSConfigModal } from './components/OSSConfigModal';
 import { ImageUpload } from './components/ImageUpload';
+import { ImageLibraryModal } from './components/ImageLibraryModal';
 import { 
   Zap, 
   Settings, 
@@ -23,7 +24,8 @@ import {
   Heart,
   Share2,
   Sparkles,
-  Palette
+  Palette,
+  FolderOpen
 } from 'lucide-react';
 
 const DEFAULT_SETTINGS: GenerationSettings = {
@@ -54,6 +56,7 @@ function CanvasApp() {
   const [showApiConfig, setShowApiConfig] = useState(false);
   const [showDatabaseConfig, setShowDatabaseConfig] = useState(false);
   const [showOSSConfig, setShowOSSConfig] = useState(false);
+  const [showImageLibrary, setShowImageLibrary] = useState(false);
   
   // 连接状态
   const [backendConnected, setBackendConnected] = useState(false);
@@ -126,23 +129,74 @@ function CanvasApp() {
       return;
     }
 
-    if (!apiConfig.apiKey) {
-      alert('请先配置 API Key');
-      setShowApiConfig(true);
-      return;
-    }
-
     try {
       setIsGenerating(true);
       setStatus(AppStatus.SUBMITTING);
       
-      // 这里应该调用实际的图片生成 API
-      // 暂时模拟生成过程
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 调用图片生成 API
+      const createResponse = await apiService.generateImage({
+        prompt: settings.prompt,
+        model: settings.model,
+        aspectRatio: settings.aspectRatio,
+        imageSize: settings.imageSize,
+        refImages: settings.refImages?.map(img => img.url)
+      });
+
+      if (!createResponse.success) {
+        throw new Error(createResponse.error || '创建生成任务失败');
+      }
+
+      const taskId = createResponse.data?.taskId;
+      if (!taskId) {
+        throw new Error('未获取到任务ID');
+      }
+
+      // 轮询获取结果
+      let attempts = 0;
+      const maxAttempts = 60; // 最多等待 60 次（约 5 分钟）
       
-      // 模拟生成的图片
-      setGeneratedImage('https://picsum.photos/512/512?random=' + Date.now());
-      setStatus(AppStatus.SUCCESS);
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 3000)); // 每 3 秒查询一次
+        
+        const statusResponse = await apiService.getGenerationStatus(taskId);
+        
+        if (statusResponse.success && statusResponse.data) {
+          const { status: taskStatus, results, progress } = statusResponse.data;
+          
+          console.log(`任务进度: ${progress}%, 状态: ${taskStatus}`);
+          
+          if (taskStatus === 'succeeded' && results?.length > 0) {
+            // 生成成功，从 results 数组获取图片 URL
+            const imageUrl = results[0].url;
+            setGeneratedImage(imageUrl);
+            setStatus(AppStatus.SUCCESS);
+            
+            // 保存到数据库
+            if (databaseConnected) {
+              try {
+                await apiService.saveGeneratedImage(taskId, {
+                  imageUrl,
+                  prompt: settings.prompt,
+                  model: settings.model,
+                  aspectRatio: settings.aspectRatio,
+                  imageSize: settings.imageSize,
+                  refImages: settings.refImages
+                });
+              } catch (saveError) {
+                console.warn('保存图片到数据库失败:', saveError);
+              }
+            }
+            return;
+          } else if (taskStatus === 'failed') {
+            throw new Error('图片生成失败');
+          }
+          // 继续等待
+        }
+        
+        attempts++;
+      }
+      
+      throw new Error('生成超时，请重试');
     } catch (error: any) {
       console.error('图片生成失败:', error);
       setStatus(AppStatus.ERROR);
@@ -193,6 +247,14 @@ function CanvasApp() {
         
         {/* 配置按钮组 */}
         <div className="pointer-events-auto flex items-center gap-2">
+          <button 
+            onClick={() => setShowImageLibrary(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:bg-purple-500/30 rounded-full text-sm transition-all duration-200 backdrop-blur-sm"
+          >
+            <FolderOpen className="w-4 h-4" />
+            <span>图片库</span>
+          </button>
+          
           <button 
             onClick={() => setShowDatabaseConfig(true)}
             className={`flex items-center gap-2 px-3 py-2 border rounded-full text-sm transition-all duration-200 backdrop-blur-sm ${
@@ -250,8 +312,12 @@ function CanvasApp() {
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               >
                 <option value="nano-banana-fast">Nano Banana Fast</option>
+                <option value="nano-banana">Nano Banana</option>
                 <option value="nano-banana-pro">Nano Banana Pro</option>
-                <option value="nano-banana-ultra">Nano Banana Ultra</option>
+                <option value="nano-banana-pro-vt">Nano Banana Pro VT</option>
+                <option value="nano-banana-pro-cl">Nano Banana Pro CL</option>
+                <option value="nano-banana-pro-vip">Nano Banana Pro VIP</option>
+                <option value="nano-banana-pro-4k-vip">Nano Banana Pro 4K VIP</option>
               </select>
             </div>
 
@@ -420,6 +486,15 @@ function CanvasApp() {
           setOssConfig(config);
           setOssConnected(config.enabled);
           setShowOSSConfig(false);
+        }}
+      />
+
+      <ImageLibraryModal
+        isOpen={showImageLibrary}
+        onClose={() => setShowImageLibrary(false)}
+        onSelectImage={(url) => {
+          // 可以用于将图片设置为参考图片
+          console.log('选择图片:', url);
         }}
       />
     </div>

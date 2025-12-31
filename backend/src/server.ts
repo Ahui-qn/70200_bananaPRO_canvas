@@ -10,11 +10,62 @@ import configRouter from './routes/config.js';
 import databaseRouter from './routes/database.js';
 import generateRouter from './routes/generate.js';
 
+// 导入服务
+import { aliOssService } from './services/aliOssService.js';
+import { databaseService } from './services/databaseService.js';
+
 // 加载环境变量
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// 初始化 OSS 服务
+const ossInitialized = aliOssService.initialize();
+
+/**
+ * 从环境变量获取数据库配置并自动连接
+ */
+async function initializeDatabase(): Promise<boolean> {
+  const dbHost = process.env.DB_HOST;
+  const dbPort = process.env.DB_PORT;
+  const dbDatabase = process.env.DB_DATABASE;
+  const dbUsername = process.env.DB_USERNAME;
+  const dbPassword = process.env.DB_PASSWORD;
+  const dbSsl = process.env.DB_SSL;
+
+  // 检查必要的配置是否存在
+  if (!dbHost || !dbDatabase || !dbUsername || !dbPassword) {
+    console.warn('⚠️  数据库配置不完整，跳过自动连接');
+    return false;
+  }
+
+  try {
+    const dbConfig = {
+      host: dbHost,
+      port: parseInt(dbPort || '3306', 10),
+      database: dbDatabase,
+      username: dbUsername,
+      password: dbPassword,
+      ssl: dbSsl === 'true',
+      enabled: true
+    };
+
+    console.log('正在连接数据库...');
+    const connected = await databaseService.connect(dbConfig);
+    
+    if (connected) {
+      console.log('✅ 数据库连接成功');
+      return true;
+    } else {
+      console.warn('⚠️  数据库连接失败');
+      return false;
+    }
+  } catch (error: any) {
+    console.error('❌ 数据库连接错误:', error.message);
+    return false;
+  }
+}
 
 // 中间件
 app.use(helmet());
@@ -74,14 +125,23 @@ app.use('*', (req, res) => {
 });
 
 // 启动服务器
-app.listen(PORT, () => {
-  console.log(`🚀 后端服务已启动`);
-  console.log(`📍 地址: http://localhost:${PORT}`);
-  console.log(`🌍 环境: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
-  console.log(`📚 API 文档:`);
-  console.log(`   - 图片管理: /api/images`);
-  console.log(`   - 配置管理: /api/config`);
-  console.log(`   - 数据库: /api/database`);
-  console.log(`   - 图片生成: /api/generate`);
-});
+const startServer = async () => {
+  // 初始化数据库连接
+  const dbConnected = await initializeDatabase();
+  
+  app.listen(PORT, () => {
+    console.log(`🚀 后端服务已启动`);
+    console.log(`📍 地址: http://localhost:${PORT}`);
+    console.log(`🌍 环境: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
+    console.log(`🗄️  数据库: ${dbConnected ? '已连接' : '未连接'}`);
+    console.log(`☁️  OSS 服务: ${ossInitialized ? '已初始化' : '未配置'}`);
+    console.log(`📚 API 文档:`);
+    console.log(`   - 图片管理: /api/images`);
+    console.log(`   - 配置管理: /api/config`);
+    console.log(`   - 数据库: /api/database`);
+    console.log(`   - 图片生成: /api/generate`);
+  });
+};
+
+startServer();

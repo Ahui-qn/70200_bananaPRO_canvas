@@ -2,8 +2,22 @@ import express from 'express';
 import { ApiResponse, CreateImageRequest, NanoBananaResultData } from '@shared/types';
 import { nanoBananaService } from '../services/nanoBananaService.js';
 import { databaseService } from '../services/databaseService.js';
+import { aliOssService } from '../services/aliOssService.js';
 
 const router = express.Router();
+
+/**
+ * 从环境变量获取 API 配置
+ */
+function getApiConfigFromEnv() {
+  return {
+    apiKey: process.env.NANO_BANANA_API_KEY || '',
+    baseUrl: process.env.NANO_BANANA_API_URL || 'https://grsai.dakka.com.cn',
+    timeout: 300000,
+    retryCount: 3,
+    provider: 'Nano Banana AI'
+  };
+}
 
 // 创建图片生成任务
 router.post('/', async (req, res) => {
@@ -19,12 +33,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json(response);
     }
 
-    // 获取 API 配置
-    const apiConfig = await databaseService.getApiConfig();
-    if (!apiConfig || !apiConfig.apiKey) {
+    // 从 .env 获取 API 配置
+    const apiConfig = getApiConfigFromEnv();
+    if (!apiConfig.apiKey) {
       const response: ApiResponse = {
         success: false,
-        error: '请先配置 Nano Banana API'
+        error: '请在 .env 文件中配置 NANO_BANANA_API_KEY'
       };
       return res.status(400).json(response);
     }
@@ -64,12 +78,12 @@ router.get('/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params;
     
-    // 获取 API 配置
-    const apiConfig = await databaseService.getApiConfig();
-    if (!apiConfig || !apiConfig.apiKey) {
+    // 从 .env 获取 API 配置
+    const apiConfig = getApiConfigFromEnv();
+    if (!apiConfig.apiKey) {
       const response: ApiResponse = {
         success: false,
-        error: '请先配置 Nano Banana API'
+        error: '请在 .env 文件中配置 NANO_BANANA_API_KEY'
       };
       return res.status(400).json(response);
     }
@@ -93,7 +107,7 @@ router.get('/:taskId', async (req, res) => {
   }
 });
 
-// 保存生成的图片
+// 保存生成的图片（上传到 OSS 并保存到数据库）
 router.post('/:taskId/save', async (req, res) => {
   try {
     const { taskId } = req.params;
@@ -107,10 +121,35 @@ router.post('/:taskId/save', async (req, res) => {
       return res.status(400).json(response);
     }
 
+    // 生成图片 ID
+    const imageId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    
+    let finalUrl = imageUrl;
+    let ossKey: string | undefined;
+    let ossUploaded = false;
+
+    // 尝试上传到 OSS
+    if (aliOssService.isConfigured()) {
+      try {
+        console.log('开始上传图片到 OSS...');
+        const uploadResult = await aliOssService.uploadFromUrl(imageUrl);
+        finalUrl = uploadResult.url;
+        ossKey = uploadResult.ossKey;
+        ossUploaded = true;
+        console.log('图片上传到 OSS 成功:', finalUrl);
+      } catch (ossError: any) {
+        console.warn('上传到 OSS 失败，使用原始 URL:', ossError.message);
+        // OSS 上传失败时继续使用原始 URL
+      }
+    } else {
+      console.log('OSS 未配置，使用原始 URL');
+    }
+
     // 创建图片记录
     const savedImage = {
-      id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      url: imageUrl,
+      id: imageId,
+      url: finalUrl,
+      originalUrl: ossUploaded ? imageUrl : undefined,  // 保存原始临时 URL
       prompt: prompt || '',
       model: model || 'nano-banana-fast',
       aspectRatio: aspectRatio || 'auto',
@@ -118,15 +157,22 @@ router.post('/:taskId/save', async (req, res) => {
       refImages: refImages || undefined,
       createdAt: new Date(),
       favorite: false,
-      ossUploaded: false
+      ossKey,
+      ossUploaded,
+      taskId  // 保存任务 ID 以便追踪
     };
 
+    // 保存到数据库
     const result = await databaseService.saveImage(savedImage);
 
     const response: ApiResponse = {
       success: true,
-      data: result,
-      message: '图片保存成功'
+      data: {
+        ...result,
+        ossUploaded,
+        ossKey
+      },
+      message: ossUploaded ? '图片已上传到 OSS 并保存到数据库' : '图片已保存到数据库（OSS 未配置）'
     };
 
     res.json(response);

@@ -174,13 +174,6 @@ npm run preview  # 预览生产构建
 - [Tailwind CSS](https://tailwindcss.com/) - 样式框架
 - [Lucide](https://lucide.dev/) - 图标库
 
-## 📞 支持
 
-如果您在使用过程中遇到问题，请：
-1. 查看 [Issues](https://github.com/your-username/nano-banana-ai-canvas/issues) 页面
-2. 创建新的 Issue 描述问题
-3. 或者发送邮件到 your-email@example.com
-
----
 
 ⭐ 如果这个项目对您有帮助，请给它一个星标！

@@ -162,17 +162,15 @@ class ApiService {
     });
   }
 
-  async testDatabaseConnection(config: DatabaseConfig): Promise<ApiResponse> {
-    return this.request('/config/test-database', {
+  async testDatabaseConnection(): Promise<ApiResponse> {
+    return this.request('/database/test', {
       method: 'POST',
-      body: JSON.stringify({ databaseConfig: config }),
     });
   }
 
-  async testOSSConnection(config: OSSConfig): Promise<ApiResponse> {
+  async testOSSConnection(): Promise<ApiResponse> {
     return this.request('/config/test-oss', {
       method: 'POST',
-      body: JSON.stringify({ ossConfig: config }),
     });
   }
 
@@ -192,10 +190,9 @@ class ApiService {
     return this.request('/database/stats');
   }
 
-  async connectDatabase(config: DatabaseConfig): Promise<ApiResponse> {
+  async connectDatabase(): Promise<ApiResponse> {
     return this.request('/database/connect', {
       method: 'POST',
-      body: JSON.stringify({ databaseConfig: config }),
     });
   }
 

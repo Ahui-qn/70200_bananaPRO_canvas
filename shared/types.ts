@@ -114,6 +114,33 @@ export interface NanoBananaResultData {
   error?: string;
 }
 
+// Nano Banana API 请求参数
+export interface NanoBananaRequest {
+  model: string;
+  prompt: string;
+  urls?: string[];           // 参考图 URL 或 Base64
+  aspectRatio?: string;      // 输出图像比例
+  imageSize?: string;        // 输出图像大小：1K, 2K, 4K
+  webHook?: string;          // 回调链接，"-1" 表示立即返回 ID
+  shutProgress?: boolean;    // 关闭进度回复
+}
+
+// Nano Banana 创建任务响应
+export interface NanoBananaCreateResponse {
+  code: number;
+  msg: string;
+  data: {
+    id: string;
+  };
+}
+
+// Nano Banana 获取结果响应
+export interface NanoBananaResultResponse {
+  code: number;
+  msg: string;
+  data: NanoBananaResultData;
+}
+
 // 统计信息
 export interface ImageStatistics {
   totalImages: number;

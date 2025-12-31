@@ -165,7 +165,13 @@ export class DatabaseServiceImpl implements DatabaseService {
   /**
    * 测试数据库连接
    */
-  async testConnection(): Promise<boolean> {
+  async testConnection(config?: DatabaseConfig): Promise<boolean | { success: boolean; latency?: number; error?: string }> {
+    // 如果提供了配置，使用新配置测试连接
+    if (config) {
+      return this.testConnectionWithConfig(config);
+    }
+
+    // 否则测试现有连接
     if (!this.connection) {
       return false;
     }
@@ -190,6 +196,73 @@ export class DatabaseServiceImpl implements DatabaseService {
       this.connectionStatus.isConnected = false;
       
       return false;
+    }
+  }
+
+  /**
+   * 使用指定配置测试数据库连接
+   */
+  async testConnectionWithConfig(config: DatabaseConfig): Promise<{ success: boolean; latency?: number; error?: string }> {
+    let testConnection: mysql.Connection | null = null;
+    
+    try {
+      // 验证配置
+      const configErrors = validateDatabaseConfig(config);
+      if (configErrors.length > 0) {
+        return {
+          success: false,
+          error: `配置错误: ${configErrors.join(', ')}`
+        };
+      }
+
+      console.log('正在测试数据库连接...', {
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        ssl: config.ssl
+      });
+
+      const startTime = Date.now();
+      
+      // 创建连接选项
+      const connectionOptions = createConnectionOptions(config);
+      
+      // 建立测试连接
+      testConnection = await mysql.createConnection(connectionOptions);
+      
+      // 测试连接
+      await testConnection.ping();
+      
+      const latency = Date.now() - startTime;
+      
+      console.log(`数据库连接测试成功，延迟: ${latency}ms`);
+      
+      return {
+        success: true,
+        latency
+      };
+
+    } catch (error: any) {
+      console.error('数据库连接测试失败:', error);
+      
+      const dbError = databaseErrorHandler.handleError(error, {
+        operation: 'TEST_CONNECTION',
+        tableName: 'database'
+      });
+      
+      return {
+        success: false,
+        error: dbError.message
+      };
+    } finally {
+      // 关闭测试连接
+      if (testConnection) {
+        try {
+          await testConnection.end();
+        } catch (e) {
+          // 忽略关闭连接时的错误
+        }
+      }
     }
   }
 
@@ -336,24 +409,24 @@ export class DatabaseServiceImpl implements DatabaseService {
         const sortOrder = pagination.sortOrder === 'ASC' ? 'ASC' : 'DESC';
         const orderClause = `ORDER BY ${sortBy} ${sortOrder}`;
         
-        // 分页参数
-        const offset = (pagination.page - 1) * pagination.pageSize;
-        const limitClause = 'LIMIT ? OFFSET ?';
+        // 分页参数 - 确保是整数
+        const pageSize = Math.max(1, Math.floor(Number(pagination.pageSize) || 20));
+        const page = Math.max(1, Math.floor(Number(pagination.page) || 1));
+        const offset = (page - 1) * pageSize;
         
         // 查询总数
         const countSql = `SELECT COUNT(*) as total FROM images ${whereClause}`;
         const [countRows] = await this.connection!.execute(countSql, queryParams);
         const total = (countRows as any[])[0].total;
         
-        // 查询数据
+        // 查询数据 - 直接将数字嵌入 SQL（因为 MySQL prepared statement 对 LIMIT/OFFSET 有限制）
         const dataSql = `
           SELECT * FROM images 
           ${whereClause} 
           ${orderClause} 
-          ${limitClause}
+          LIMIT ${pageSize} OFFSET ${offset}
         `;
-        const dataParams = [...queryParams, pagination.pageSize, offset];
-        const [dataRows] = await this.connection!.execute(dataSql, dataParams);
+        const [dataRows] = await this.connection!.execute(dataSql, queryParams);
         
         // 转换数据格式
         const images = (dataRows as any[]).map(row => this.rowToSavedImage(row));
@@ -361,11 +434,11 @@ export class DatabaseServiceImpl implements DatabaseService {
         const result: PaginatedResult<SavedImage> = {
           data: images,
           total,
-          page: pagination.page,
-          pageSize: pagination.pageSize,
-          totalPages: Math.ceil(total / pagination.pageSize),
-          hasNext: pagination.page < Math.ceil(total / pagination.pageSize),
-          hasPrev: pagination.page > 1
+          page: page,
+          pageSize: pageSize,
+          totalPages: Math.ceil(total / pageSize),
+          hasNext: page < Math.ceil(total / pageSize),
+          hasPrev: page > 1
         };
         
         const duration = Date.now() - startTime;
@@ -1379,6 +1452,25 @@ export class DatabaseServiceImpl implements DatabaseService {
    * 转换数据库行为 SavedImage 对象
    */
   private rowToSavedImage(row: any): SavedImage {
+    // 安全解析 JSON 字段
+    let refImages = undefined;
+    if (row.ref_images) {
+      try {
+        refImages = typeof row.ref_images === 'string' ? JSON.parse(row.ref_images) : row.ref_images;
+      } catch (e) {
+        console.warn('解析 ref_images 失败:', e);
+      }
+    }
+
+    let tags = undefined;
+    if (row.tags) {
+      try {
+        tags = typeof row.tags === 'string' ? JSON.parse(row.tags) : row.tags;
+      } catch (e) {
+        console.warn('解析 tags 失败:', e);
+      }
+    }
+
     return {
       id: row.id,
       url: row.url,
@@ -1387,9 +1479,9 @@ export class DatabaseServiceImpl implements DatabaseService {
       model: row.model,
       aspectRatio: row.aspect_ratio || 'auto',
       imageSize: row.image_size || '1K',
-      refImages: row.ref_images ? JSON.parse(row.ref_images) : undefined,
+      refImages,
       createdAt: new Date(row.created_at),
-      tags: row.tags ? JSON.parse(row.tags) : undefined,
+      tags,
       favorite: Boolean(row.favorite),
       ossKey: row.oss_key || undefined,
       ossUploaded: Boolean(row.oss_uploaded)

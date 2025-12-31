@@ -167,39 +167,56 @@ export class DatabaseInitializer {
 
   /**
    * 创建所有必要的索引
+   * 使用兼容阿里云 MySQL 的语法（不使用 IF NOT EXISTS）
    */
   private async createIndexes(): Promise<void> {
     console.log('创建数据库索引...');
     
-    const indexQueries = [
+    // 索引定义：[表名, 索引名, 列名]
+    const indexDefinitions: [string, string, string][] = [
       // images 表索引
-      `CREATE INDEX IF NOT EXISTS idx_images_created_at ON ${TABLE_NAMES.IMAGES} (created_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_images_model ON ${TABLE_NAMES.IMAGES} (model)`,
-      `CREATE INDEX IF NOT EXISTS idx_images_favorite ON ${TABLE_NAMES.IMAGES} (favorite)`,
-      `CREATE INDEX IF NOT EXISTS idx_images_user_id ON ${TABLE_NAMES.IMAGES} (user_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_images_oss_uploaded ON ${TABLE_NAMES.IMAGES} (oss_uploaded)`,
-      `CREATE INDEX IF NOT EXISTS idx_images_updated_at ON ${TABLE_NAMES.IMAGES} (updated_at)`,
+      [TABLE_NAMES.IMAGES, 'idx_images_created_at', 'created_at'],
+      [TABLE_NAMES.IMAGES, 'idx_images_model', 'model'],
+      [TABLE_NAMES.IMAGES, 'idx_images_favorite', 'favorite'],
+      [TABLE_NAMES.IMAGES, 'idx_images_user_id', 'user_id'],
+      [TABLE_NAMES.IMAGES, 'idx_images_oss_uploaded', 'oss_uploaded'],
+      [TABLE_NAMES.IMAGES, 'idx_images_updated_at', 'updated_at'],
       
       // operation_logs 表索引
-      `CREATE INDEX IF NOT EXISTS idx_logs_created_at ON ${TABLE_NAMES.OPERATION_LOGS} (created_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_logs_operation ON ${TABLE_NAMES.OPERATION_LOGS} (operation)`,
-      `CREATE INDEX IF NOT EXISTS idx_logs_user_id ON ${TABLE_NAMES.OPERATION_LOGS} (user_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_logs_status ON ${TABLE_NAMES.OPERATION_LOGS} (status)`,
-      `CREATE INDEX IF NOT EXISTS idx_logs_table_name ON ${TABLE_NAMES.OPERATION_LOGS} (table_name)`,
+      [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_created_at', 'created_at'],
+      [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_operation', 'operation'],
+      [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_user_id', 'user_id'],
+      [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_status', 'status'],
+      [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_table_name', 'table_name'],
       
       // 复合索引
-      `CREATE INDEX IF NOT EXISTS idx_images_user_favorite ON ${TABLE_NAMES.IMAGES} (user_id, favorite)`,
-      `CREATE INDEX IF NOT EXISTS idx_images_model_created ON ${TABLE_NAMES.IMAGES} (model, created_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_logs_table_operation ON ${TABLE_NAMES.OPERATION_LOGS} (table_name, operation)`,
+      [TABLE_NAMES.IMAGES, 'idx_images_user_favorite', 'user_id, favorite'],
+      [TABLE_NAMES.IMAGES, 'idx_images_model_created', 'model, created_at'],
+      [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_table_operation', 'table_name, operation'],
     ];
     
-    for (const query of indexQueries) {
+    for (const [tableName, indexName, columns] of indexDefinitions) {
       try {
-        await this.connection.execute(query);
+        // 先检查索引是否存在
+        const [existingIndexes] = await this.connection.execute(
+          `SELECT INDEX_NAME FROM information_schema.STATISTICS 
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+          [tableName, indexName]
+        );
+        
+        if ((existingIndexes as any[]).length === 0) {
+          // 索引不存在，创建它
+          await this.connection.execute(`CREATE INDEX ${indexName} ON ${tableName} (${columns})`);
+          console.log(`索引 ${indexName} 创建成功`);
+        } else {
+          console.log(`索引 ${indexName} 已存在，跳过`);
+        }
       } catch (error: any) {
-        // 如果索引已存在，忽略错误
-        if (!error.message.includes('Duplicate key name')) {
-          console.warn('创建索引时出现警告:', error.message);
+        // 如果索引已存在（Duplicate key name），忽略错误
+        if (error.message.includes('Duplicate key name') || error.code === 'ER_DUP_KEYNAME') {
+          console.log(`索引 ${indexName} 已存在，跳过`);
+        } else {
+          console.warn(`创建索引 ${indexName} 时出现警告:`, error.message);
         }
       }
     }

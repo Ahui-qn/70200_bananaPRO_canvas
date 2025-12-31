@@ -7,23 +7,38 @@ import { ApiConfig, NanoBananaRequest, NanoBananaCreateResponse, NanoBananaResul
 class NanoBananaService {
   /**
    * 创建图片生成任务
+   * 使用 webHook="-1" 参数立即返回任务 ID，然后通过轮询获取结果
    */
   async createTask(request: NanoBananaRequest, apiConfig: ApiConfig): Promise<string> {
     try {
-      const response = await fetch(apiConfig.baseUrl, {
+      // 构建请求 URL：baseUrl + /v1/draw/nano-banana
+      const url = `${apiConfig.baseUrl}/v1/draw/nano-banana`;
+      
+      // 添加 webHook="-1" 以立即返回任务 ID
+      const requestBody = {
+        ...request,
+        webHook: '-1'
+      };
+      
+      console.log('创建 Nano Banana 任务:', url, requestBody);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiConfig.apiKey}`,
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API 响应错误:', response.status, errorText);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data: NanoBananaCreateResponse = await response.json();
+      console.log('创建任务响应:', data);
       
       if (data.code !== 0) {
         throw new Error(data.msg || '创建任务失败');
@@ -38,23 +53,32 @@ class NanoBananaService {
 
   /**
    * 获取任务结果
+   * 使用 POST /v1/draw/result 接口
    */
   async getTaskResult(taskId: string, apiConfig: ApiConfig): Promise<NanoBananaResultResponse> {
     try {
-      const url = `${apiConfig.baseUrl}/${taskId}`;
+      // 构建请求 URL：baseUrl + /v1/draw/result
+      const url = `${apiConfig.baseUrl}/v1/draw/result`;
+      
+      console.log('获取任务结果:', url, { id: taskId });
       
       const response = await fetch(url, {
-        method: 'GET',
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiConfig.apiKey}`,
         },
+        body: JSON.stringify({ id: taskId }),
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API 响应错误:', response.status, errorText);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data: NanoBananaResultResponse = await response.json();
+      console.log('获取结果响应:', data);
       
       if (data.code === -22) {
         throw new Error('任务不存在');
