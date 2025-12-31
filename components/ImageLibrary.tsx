@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { SavedImage } from '../types';
-import { imageStorage, downloadImage } from '../services/imageStorage';
+import { SavedImage, PaginationOptions, PaginatedResult } from '../types';
+import { databaseService } from '../services/databaseService';
+import { downloadImage } from './utils/downloadUtils';
 import { ossStorage, loadOSSConfig } from '../services/ossStorage';
 import { 
   X, 
@@ -17,7 +18,10 @@ import {
   MoreVertical,
   Cloud,
   Upload,
-  CheckCircle
+  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react';
 
 interface ImageLibraryProps {
@@ -29,8 +33,15 @@ type ViewMode = 'grid' | 'list';
 type FilterMode = 'all' | 'favorites' | 'recent';
 
 export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) => {
-  const [images, setImages] = useState<SavedImage[]>([]);
-  const [filteredImages, setFilteredImages] = useState<SavedImage[]>([]);
+  const [paginatedResult, setPaginatedResult] = useState<PaginatedResult<SavedImage>>({
+    data: [],
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    totalPages: 0,
+    hasNext: false,
+    hasPrev: false
+  });
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('all');
@@ -46,83 +57,140 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
   const [ossConfigured, setOssConfigured] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ completed: 0, total: 0 });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [isConnected, setIsConnected] = useState(false);
 
   // 加载图片数据
-  const loadImages = async () => {
+  const loadImages = async (page: number = currentPage, resetSelection: boolean = true) => {
     setLoading(true);
+    
+    if (resetSelection) {
+      setSelectedImages(new Set());
+    }
+    
     try {
-      const allImages = await imageStorage.getAllImages();
-      const statsData = await imageStorage.getStats();
+      // 检查数据库连接状态
+      const connectionStatus = databaseService.getConnectionStatus();
+      setIsConnected(connectionStatus.isConnected);
       
-      setImages(allImages);
-      setStats(statsData);
-      applyFilters(allImages);
+      if (!connectionStatus.isConnected) {
+        console.warn('数据库未连接，无法加载图片');
+        setPaginatedResult({
+          data: [],
+          total: 0,
+          page: 1,
+          pageSize,
+          totalPages: 0,
+          hasNext: false,
+          hasPrev: false
+        });
+        setStats({
+          totalImages: 0,
+          favoriteCount: 0,
+          modelStats: {},
+          recentCount: 0
+        });
+        return;
+      }
+
+      // 构建分页选项
+      const paginationOptions: PaginationOptions = {
+        page,
+        pageSize,
+        sortBy: 'created_at',
+        sortOrder: 'DESC',
+        filters: {}
+      };
+
+      // 应用筛选条件
+      if (filterMode === 'favorites') {
+        paginationOptions.filters!.favorite = true;
+      } else if (filterMode === 'recent') {
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        paginationOptions.filters!.dateRange = {
+          start: oneDayAgo,
+          end: new Date()
+        };
+      }
+
+      if (selectedModel !== 'all') {
+        paginationOptions.filters!.model = selectedModel;
+      }
+
+      if (searchQuery.trim()) {
+        paginationOptions.filters!.search = searchQuery.trim();
+      }
+
+      // 从数据库获取分页数据
+      const result = await databaseService.getImages(paginationOptions);
+      setPaginatedResult(result);
+      setCurrentPage(page);
+
+      // 获取统计信息
+      const imageStats = await databaseService.getImageStatistics();
+      setStats({
+        totalImages: imageStats.totalImages,
+        favoriteCount: imageStats.favoriteImages,
+        modelStats: imageStats.byModel,
+        recentCount: imageStats.byTimeRange.today
+      });
       
       // 检查 OSS 配置状态
       const ossConfig = loadOSSConfig();
       setOssConfigured(ossConfig !== null && ossStorage.isConfigured());
+      
     } catch (error) {
       console.error('加载图片失败:', error);
+      // 显示错误状态
+      setPaginatedResult({
+        data: [],
+        total: 0,
+        page: 1,
+        pageSize,
+        totalPages: 0,
+        hasNext: false,
+        hasPrev: false
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  // 应用筛选条件
-  const applyFilters = (imageList: SavedImage[] = images) => {
-    let filtered = [...imageList];
-
-    // 按筛选模式过滤
-    switch (filterMode) {
-      case 'favorites':
-        filtered = filtered.filter(img => img.favorite);
-        break;
-      case 'recent':
-        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        filtered = filtered.filter(img => new Date(img.createdAt) > oneDayAgo);
-        break;
-    }
-
-    // 按模型过滤
-    if (selectedModel !== 'all') {
-      filtered = filtered.filter(img => img.model === selectedModel);
-    }
-
-    // 按搜索词过滤
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(img => 
-        img.prompt.toLowerCase().includes(query) ||
-        img.model.toLowerCase().includes(query) ||
-        (img.tags && img.tags.some(tag => tag.toLowerCase().includes(query)))
-      );
-    }
-
-    setFilteredImages(filtered);
-  };
-
   // 切换收藏状态
   const toggleFavorite = async (imageId: string) => {
+    if (!isConnected) {
+      alert('数据库未连接，无法更新收藏状态');
+      return;
+    }
+
     try {
-      const image = images.find(img => img.id === imageId);
+      const image = paginatedResult.data.find(img => img.id === imageId);
       if (!image) return;
 
-      await imageStorage.updateImage(imageId, { favorite: !image.favorite });
-      await loadImages(); // 重新加载数据
+      await databaseService.updateImage(imageId, { favorite: !image.favorite });
+      await loadImages(currentPage, false); // 重新加载当前页数据，不重置选择
     } catch (error) {
       console.error('更新收藏状态失败:', error);
+      alert('更新收藏状态失败，请重试');
     }
   };
 
   // 删除图片
   const deleteImage = async (imageId: string) => {
+    if (!isConnected) {
+      alert('数据库未连接，无法删除图片');
+      return;
+    }
+
     if (!confirm('确定要删除这张图片吗？')) return;
 
     try {
-      await imageStorage.deleteImage(imageId);
-      await loadImages(); // 重新加载数据
+      await databaseService.deleteImage(imageId, true); // 启用级联删除
+      await loadImages(currentPage, false); // 重新加载当前页数据
     } catch (error) {
       console.error('删除图片失败:', error);
+      alert('删除图片失败，请重试');
     }
   };
 
@@ -139,7 +207,7 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
 
   // 批量操作
   const handleBatchDownload = async () => {
-    const selectedImageList = images.filter(img => selectedImages.has(img.id));
+    const selectedImageList = paginatedResult.data.filter(img => selectedImages.has(img.id));
     
     for (const image of selectedImageList) {
       await handleDownload(image);
@@ -151,16 +219,24 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
   };
 
   const handleBatchDelete = async () => {
+    if (!isConnected) {
+      alert('数据库未连接，无法删除图片');
+      return;
+    }
+
     if (!confirm(`确定要删除选中的 ${selectedImages.size} 张图片吗？`)) return;
 
     try {
-      for (const imageId of selectedImages) {
-        await imageStorage.deleteImage(imageId);
-      }
+      const deletePromises = Array.from(selectedImages).map(imageId => 
+        databaseService.deleteImage(imageId, true)
+      );
+      
+      await Promise.all(deletePromises);
       setSelectedImages(new Set());
-      await loadImages();
+      await loadImages(currentPage, false);
     } catch (error) {
       console.error('批量删除失败:', error);
+      alert('批量删除失败，请重试');
     }
   };
 
@@ -171,7 +247,7 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
       return;
     }
 
-    const selectedImageList = images.filter(img => 
+    const selectedImageList = paginatedResult.data.filter(img => 
       selectedImages.has(img.id) && !img.ossUploaded
     );
 
@@ -192,13 +268,15 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
         try {
           const updatedImage = await ossStorage.saveImageToOSS(image);
           
-          // 更新本地记录
-          await imageStorage.updateImage(image.id, {
-            url: updatedImage.url,
-            originalUrl: image.url,
-            ossKey: updatedImage.ossKey,
-            ossUploaded: true
-          });
+          // 更新数据库记录
+          if (isConnected) {
+            await databaseService.updateImage(image.id, {
+              url: updatedImage.url,
+              originalUrl: image.url,
+              ossKey: updatedImage.ossKey,
+              ossUploaded: true
+            });
+          }
           
           setUploadProgress({ completed: i + 1, total: selectedImageList.length });
           
@@ -213,11 +291,12 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
       }
       
       // 重新加载数据
-      await loadImages();
+      await loadImages(currentPage, false);
       setSelectedImages(new Set());
       
     } catch (error) {
       console.error('批量上传失败:', error);
+      alert('批量上传失败，请重试');
     } finally {
       setUploading(false);
       setUploadProgress({ completed: 0, total: 0 });
@@ -235,6 +314,25 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
     setSelectedImages(newSelection);
   };
 
+  // 分页处理
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= paginatedResult.totalPages) {
+      loadImages(newPage);
+    }
+  };
+
+  // 刷新数据
+  const handleRefresh = () => {
+    loadImages(currentPage);
+  };
+
+  // 筛选条件变化时重新加载
+  useEffect(() => {
+    if (isOpen) {
+      loadImages(1); // 重置到第一页
+    }
+  }, [searchQuery, selectedModel, filterMode]);
+
   // 获取可用的模型列表
   const availableModels = Object.keys(stats.modelStats);
 
@@ -244,11 +342,6 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
       loadImages();
     }
   }, [isOpen]);
-
-  // 筛选条件变化时重新应用筛选
-  useEffect(() => {
-    applyFilters();
-  }, [searchQuery, selectedModel, filterMode, images]);
 
   if (!isOpen) return null;
 
@@ -303,10 +396,29 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
                 <span className="text-sm font-medium text-blue-300">云存储状态</span>
               </div>
               <div className="text-xs text-blue-200">
-                {images.filter(img => img.ossUploaded).length} / {images.length} 张已上传
+                {paginatedResult.data.filter(img => img.ossUploaded).length} / {paginatedResult.data.length} 张已上传
               </div>
             </div>
           )}
+
+          {/* 数据库连接状态 */}
+          <div className={`mt-4 rounded-lg p-3 ${
+            isConnected 
+              ? 'bg-green-600/10 border border-green-600/20' 
+              : 'bg-red-600/10 border border-red-600/20'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span className={`text-sm font-medium ${isConnected ? 'text-green-300' : 'text-red-300'}`}>
+                {isConnected ? '数据库已连接' : '数据库未连接'}
+              </span>
+            </div>
+            {!isConnected && (
+              <div className="text-xs text-red-200">
+                请检查数据库配置和网络连接
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 筛选选项 */}
@@ -403,6 +515,15 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
                 <List className="w-4 h-4" />
               </button>
             </div>
+
+            {/* 刷新按钮 */}
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="p-2 bg-zinc-800/50 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
 
           {/* 批量操作 */}
@@ -430,7 +551,8 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
               </button>
               <button
                 onClick={handleBatchDelete}
-                className="px-3 py-2 bg-red-600/20 text-red-300 rounded-lg text-sm hover:bg-red-600/30 transition-colors"
+                disabled={!isConnected}
+                className="px-3 py-2 bg-red-600/20 text-red-300 rounded-lg text-sm hover:bg-red-600/30 transition-colors disabled:opacity-50"
               >
                 <Trash2 className="w-4 h-4 inline mr-1" />
                 删除
@@ -440,136 +562,211 @@ export const ImageLibrary: React.FC<ImageLibraryProps> = ({ isOpen, onClose }) =
         </div>
 
         {/* 图片列表 */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center h-64">
-              <div className="text-zinc-500">加载中...</div>
+              <div className="flex items-center gap-3 text-zinc-500">
+                <RefreshCw className="w-5 h-5 animate-spin" />
+                <span>加载中...</span>
+              </div>
             </div>
-          ) : filteredImages.length === 0 ? (
+          ) : !isConnected ? (
+            <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
+              <Database className="w-12 h-12 mb-4 opacity-50" />
+              <p className="text-lg mb-2">数据库未连接</p>
+              <p className="text-sm">请检查数据库配置和网络连接</p>
+            </div>
+          ) : paginatedResult.data.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
               <ImageIcon className="w-12 h-12 mb-4 opacity-50" />
-              <p>暂无图片</p>
+              <p className="text-lg mb-2">暂无图片</p>
               <p className="text-sm">生成一些图片后会显示在这里</p>
             </div>
-          ) : viewMode === 'grid' ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {filteredImages.map((image) => (
-                <div key={image.id} className="group relative bg-zinc-800/50 rounded-lg overflow-hidden">
-                  <div className="aspect-square relative">
-                    <img
-                      src={image.url}
-                      alt={image.prompt}
-                      className="w-full h-full object-cover"
-                    />
-                    
-                    {/* 选择框 */}
-                    <div className="absolute top-2 left-2">
+          ) : (
+            <div className="p-6">
+              {viewMode === 'grid' ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {paginatedResult.data.map((image) => (
+                    <div key={image.id} className="group relative bg-zinc-800/50 rounded-lg overflow-hidden">
+                      <div className="aspect-square relative">
+                        <img
+                          src={image.url}
+                          alt={image.prompt}
+                          className="w-full h-full object-cover"
+                        />
+                        
+                        {/* 选择框 */}
+                        <div className="absolute top-2 left-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedImages.has(image.id)}
+                            onChange={() => toggleImageSelection(image.id)}
+                            className="w-4 h-4 rounded border-zinc-600 bg-zinc-800/80 text-purple-600 focus:ring-purple-500/50"
+                          />
+                        </div>
+
+                        {/* 收藏按钮 */}
+                        <button
+                          onClick={() => toggleFavorite(image.id)}
+                          disabled={!isConnected}
+                          className="absolute top-2 right-2 p-1 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
+                        >
+                          <Heart className={`w-4 h-4 ${image.favorite ? 'text-red-400 fill-current' : 'text-white'}`} />
+                        </button>
+
+                        {/* OSS 状态指示器 */}
+                        {image.ossUploaded && (
+                          <div className="absolute top-2 left-8 p-1 bg-blue-600/80 rounded-full">
+                            <Cloud className="w-3 h-3 text-white" />
+                          </div>
+                        )}
+
+                        {/* 操作按钮 */}
+                        <div className="absolute bottom-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => handleDownload(image)}
+                            className="p-1 bg-black/50 rounded-full text-white hover:bg-black/70"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteImage(image.id)}
+                            disabled={!isConnected}
+                            className="p-1 bg-black/50 rounded-full text-white hover:bg-black/70 disabled:opacity-30"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 图片信息 */}
+                      <div className="p-3">
+                        <p className="text-sm text-zinc-200 line-clamp-2 mb-1">{image.prompt}</p>
+                        <div className="flex items-center justify-between text-xs text-zinc-500">
+                          <span>{image.model}</span>
+                          <span>{new Date(image.createdAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {paginatedResult.data.map((image) => (
+                    <div key={image.id} className="flex items-center gap-4 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-800/70 transition-colors">
                       <input
                         type="checkbox"
                         checked={selectedImages.has(image.id)}
                         onChange={() => toggleImageSelection(image.id)}
                         className="w-4 h-4 rounded border-zinc-600 bg-zinc-800/80 text-purple-600 focus:ring-purple-500/50"
                       />
-                    </div>
-
-                    {/* 收藏按钮 */}
-                    <button
-                      onClick={() => toggleFavorite(image.id)}
-                      className="absolute top-2 right-2 p-1 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Heart className={`w-4 h-4 ${image.favorite ? 'text-red-400 fill-current' : 'text-white'}`} />
-                    </button>
-
-                    {/* OSS 状态指示器 */}
-                    {image.ossUploaded && (
-                      <div className="absolute top-2 left-8 p-1 bg-blue-600/80 rounded-full">
-                        <Cloud className="w-3 h-3 text-white" />
+                      
+                      <img
+                        src={image.url}
+                        alt={image.prompt}
+                        className="w-16 h-16 object-cover rounded-lg"
+                      />
+                      
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-zinc-200 truncate">{image.prompt}</p>
+                        <div className="flex items-center gap-4 text-xs text-zinc-500 mt-1">
+                          <span>{image.model}</span>
+                          <span>{image.aspectRatio}</span>
+                          <span>{image.imageSize}</span>
+                          <span>{new Date(image.createdAt).toLocaleString()}</span>
+                          {image.ossUploaded && (
+                            <span className="flex items-center gap-1 text-blue-400">
+                              <Cloud className="w-3 h-3" />
+                              已上传 OSS
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    )}
 
-                    {/* 操作按钮 */}
-                    <div className="absolute bottom-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => handleDownload(image)}
-                        className="p-1 bg-black/50 rounded-full text-white hover:bg-black/70"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => deleteImage(image.id)}
-                        className="p-1 bg-black/50 rounded-full text-white hover:bg-black/70"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => toggleFavorite(image.id)}
+                          disabled={!isConnected}
+                          className="p-2 hover:bg-zinc-700 rounded-lg transition-colors disabled:opacity-30"
+                        >
+                          <Heart className={`w-4 h-4 ${image.favorite ? 'text-red-400 fill-current' : 'text-zinc-400'}`} />
+                        </button>
+                        <button
+                          onClick={() => handleDownload(image)}
+                          className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteImage(image.id)}
+                          disabled={!isConnected}
+                          className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-red-400 transition-colors disabled:opacity-30"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* 图片信息 */}
-                  <div className="p-3">
-                    <p className="text-sm text-zinc-200 line-clamp-2 mb-1">{image.prompt}</p>
-                    <div className="flex items-center justify-between text-xs text-zinc-500">
-                      <span>{image.model}</span>
-                      <span>{new Date(image.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {filteredImages.map((image) => (
-                <div key={image.id} className="flex items-center gap-4 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-800/70 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={selectedImages.has(image.id)}
-                    onChange={() => toggleImageSelection(image.id)}
-                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-800/80 text-purple-600 focus:ring-purple-500/50"
-                  />
-                  
-                  <img
-                    src={image.url}
-                    alt={image.prompt}
-                    className="w-16 h-16 object-cover rounded-lg"
-                  />
-                  
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-200 truncate">{image.prompt}</p>
-                    <div className="flex items-center gap-4 text-xs text-zinc-500 mt-1">
-                      <span>{image.model}</span>
-                      <span>{image.aspectRatio}</span>
-                      <span>{image.imageSize}</span>
-                      <span>{new Date(image.createdAt).toLocaleString()}</span>
-                      {image.ossUploaded && (
-                        <span className="flex items-center gap-1 text-blue-400">
-                          <Cloud className="w-3 h-3" />
-                          已上传 OSS
-                        </span>
-                      )}
-                    </div>
-                  </div>
+              )}
 
+              {/* 分页控件 */}
+              {paginatedResult.totalPages > 1 && (
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-800">
+                  <div className="text-sm text-zinc-500">
+                    显示 {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, paginatedResult.total)} 
+                    ，共 {paginatedResult.total} 张图片
+                  </div>
+                  
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => toggleFavorite(image.id)}
-                      className="p-2 hover:bg-zinc-700 rounded-lg transition-colors"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={!paginatedResult.hasPrev || loading}
+                      className="p-2 bg-zinc-800/50 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     >
-                      <Heart className={`w-4 h-4 ${image.favorite ? 'text-red-400 fill-current' : 'text-zinc-400'}`} />
+                      <ChevronLeft className="w-4 h-4" />
                     </button>
+                    
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, paginatedResult.totalPages) }, (_, i) => {
+                        let pageNum;
+                        if (paginatedResult.totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= paginatedResult.totalPages - 2) {
+                          pageNum = paginatedResult.totalPages - 4 + i;
+                        } else {
+                          pageNum = currentPage - 2 + i;
+                        }
+                        
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => handlePageChange(pageNum)}
+                            disabled={loading}
+                            className={`px-3 py-1 rounded text-sm transition-colors disabled:cursor-not-allowed ${
+                              pageNum === currentPage
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    
                     <button
-                      onClick={() => handleDownload(image)}
-                      className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={!paginatedResult.hasNext || loading}
+                      className="p-2 bg-zinc-800/50 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     >
-                      <Download className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => deleteImage(image.id)}
-                      className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
+                      <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>

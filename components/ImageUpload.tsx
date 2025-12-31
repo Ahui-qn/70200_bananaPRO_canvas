@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, X, Image as ImageIcon, AlertCircle } from 'lucide-react';
-import { UploadedImage } from '../types';
+import { UploadedImage } from '../shared/types';
 
 interface ImageUploadProps {
   images: UploadedImage[];

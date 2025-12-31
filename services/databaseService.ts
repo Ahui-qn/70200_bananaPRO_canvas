@@ -14,7 +14,10 @@ import {
   PaginatedResult,
   DatabaseService,
   OperationLog,
-  DatabaseError
+  DatabaseError,
+  ImageStatistics,
+  DatabaseStatistics,
+  StatisticsFilter
 } from '../types';
 import { 
   validateDatabaseConfig,
@@ -29,8 +32,11 @@ import {
 } from '../utils/database';
 import { getEncryptionService } from './encryptionService';
 import { createDatabaseInitializer } from './databaseInitializer';
+import { createDatabaseMigrator, DatabaseMigrator, MigrationResult, VersionComparison } from './databaseMigrator';
 import { databaseErrorHandler } from './databaseErrorHandler';
 import { networkErrorHandler } from './networkErrorHandler';
+import { conflictResolver, ConflictResolutionStrategy } from './conflictResolver';
+import { ConnectionMonitor, createConnectionMonitor, ConnectionStatusListener } from './connectionMonitor';
 
 /**
  * 数据库服务实现类
@@ -46,6 +52,13 @@ export class DatabaseServiceImpl implements DatabaseService {
   };
   private retryCount = 0;
   private isConnecting = false;
+  private connectionMonitor: ConnectionMonitor;
+  private migrator: DatabaseMigrator | null = null;
+
+  constructor() {
+    // 初始化连接监控器
+    this.connectionMonitor = createConnectionMonitor(this);
+  }
 
   /**
    * 连接到数据库
@@ -99,6 +112,9 @@ export class DatabaseServiceImpl implements DatabaseService {
       };
       this.retryCount = 0;
 
+      // 初始化迁移器
+      this.migrator = createDatabaseMigrator(this.connection);
+
       console.log(`数据库连接成功，延迟: ${latency}ms`);
       
       // 记录连接日志
@@ -140,6 +156,7 @@ export class DatabaseServiceImpl implements DatabaseService {
         console.error('断开数据库连接时出错:', error);
       } finally {
         this.connection = null;
+        this.migrator = null;
         this.connectionStatus.isConnected = false;
       }
     }
@@ -366,72 +383,55 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
-   * 更新图片信息
+   * 更新图片信息（带冲突检测）
    */
   async updateImage(id: string, updates: Partial<SavedImage>): Promise<SavedImage> {
     return this.executeWithRetry(async () => {
       const startTime = Date.now();
       
       try {
-        // 构建更新字段
-        const updateFields: string[] = [];
-        const updateValues: any[] = [];
+        // 首先获取当前数据库中的数据
+        const [currentRows] = await this.connection!.execute('SELECT * FROM images WHERE id = ?', [id]);
         
-        if (updates.url !== undefined) {
-          updateFields.push('url = ?');
-          updateValues.push(updates.url);
-        }
-        if (updates.originalUrl !== undefined) {
-          updateFields.push('original_url = ?');
-          updateValues.push(updates.originalUrl);
-        }
-        if (updates.prompt !== undefined) {
-          updateFields.push('prompt = ?');
-          updateValues.push(updates.prompt);
-        }
-        if (updates.tags !== undefined) {
-          updateFields.push('tags = ?');
-          updateValues.push(updates.tags ? JSON.stringify(updates.tags) : null);
-        }
-        if (updates.favorite !== undefined) {
-          updateFields.push('favorite = ?');
-          updateValues.push(Boolean(updates.favorite));
-        }
-        if (updates.ossKey !== undefined) {
-          updateFields.push('oss_key = ?');
-          updateValues.push(updates.ossKey);
-        }
-        if (updates.ossUploaded !== undefined) {
-          updateFields.push('oss_uploaded = ?');
-          updateValues.push(Boolean(updates.ossUploaded));
-        }
-        
-        // 总是更新 updated_at
-        updateFields.push('updated_at = ?');
-        updateValues.push(new Date());
-        
-        if (updateFields.length === 1) { // 只有 updated_at
-          throw new Error('没有需要更新的字段');
-        }
-        
-        const sql = `UPDATE images SET ${updateFields.join(', ')} WHERE id = ?`;
-        updateValues.push(id);
-        
-        const [result] = await this.connection!.execute(sql, updateValues);
-        
-        if ((result as any).affectedRows === 0) {
+        if ((currentRows as any[]).length === 0) {
           throw new Error(`图片不存在: ${id}`);
         }
         
-        // 获取更新后的数据
-        const [rows] = await this.connection!.execute('SELECT * FROM images WHERE id = ?', [id]);
-        const updatedImage = this.rowToSavedImage((rows as any[])[0]);
+        const currentData = this.rowToSavedImage((currentRows as any[])[0]);
         
-        const duration = Date.now() - startTime;
-        await this.logOperation('UPDATE', 'images', id, 'SUCCESS', null, duration);
+        // 检测冲突（如果更新数据包含时间戳信息）
+        if (updates.createdAt || (updates as any).updatedAt) {
+          const localData = { ...currentData, ...updates };
+          const conflictInfo = conflictResolver.detectConflict(
+            localData,
+            currentData,
+            id,
+            'images'
+          );
+          
+          if (conflictInfo) {
+            console.log(`检测到图片更新冲突: ${id}`);
+            
+            // 使用最新时间戳策略解决冲突
+            const resolution = conflictResolver.resolveConflict(
+              conflictInfo,
+              ConflictResolutionStrategy.LATEST_WINS
+            );
+            
+            if (resolution.resolved) {
+              console.log(`冲突已解决: ${resolution.message}`);
+              // 使用解决后的数据进行更新
+              const resolvedUpdates = this.extractUpdatesFromResolvedData(resolution.finalData, currentData);
+              return await this.performImageUpdate(id, resolvedUpdates, startTime);
+            } else {
+              console.warn(`冲突解决失败: ${resolution.message}`);
+              // 继续使用原始更新数据
+            }
+          }
+        }
         
-        console.log(`图片更新成功: ${id}`);
-        return updatedImage;
+        // 没有冲突或冲突解决失败，执行正常更新
+        return await this.performImageUpdate(id, updates, startTime);
 
       } catch (error: any) {
         const duration = Date.now() - startTime;
@@ -439,6 +439,109 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw error;
       }
     }, '更新图片');
+  }
+
+  /**
+   * 执行图片更新操作
+   * @private
+   */
+  private async performImageUpdate(
+    id: string, 
+    updates: Partial<SavedImage>, 
+    startTime: number
+  ): Promise<SavedImage> {
+    // 构建更新字段
+    const updateFields: string[] = [];
+    const updateValues: any[] = [];
+    
+    if (updates.url !== undefined) {
+      updateFields.push('url = ?');
+      updateValues.push(updates.url);
+    }
+    if (updates.originalUrl !== undefined) {
+      updateFields.push('original_url = ?');
+      updateValues.push(updates.originalUrl);
+    }
+    if (updates.prompt !== undefined) {
+      updateFields.push('prompt = ?');
+      updateValues.push(updates.prompt);
+    }
+    if (updates.tags !== undefined) {
+      updateFields.push('tags = ?');
+      updateValues.push(updates.tags ? JSON.stringify(updates.tags) : null);
+    }
+    if (updates.favorite !== undefined) {
+      updateFields.push('favorite = ?');
+      updateValues.push(Boolean(updates.favorite));
+    }
+    if (updates.ossKey !== undefined) {
+      updateFields.push('oss_key = ?');
+      updateValues.push(updates.ossKey);
+    }
+    if (updates.ossUploaded !== undefined) {
+      updateFields.push('oss_uploaded = ?');
+      updateValues.push(Boolean(updates.ossUploaded));
+    }
+    
+    // 总是更新 updated_at
+    updateFields.push('updated_at = ?');
+    updateValues.push(new Date());
+    
+    if (updateFields.length === 1) { // 只有 updated_at
+      throw new Error('没有需要更新的字段');
+    }
+    
+    const sql = `UPDATE images SET ${updateFields.join(', ')} WHERE id = ?`;
+    updateValues.push(id);
+    
+    const [result] = await this.connection!.execute(sql, updateValues);
+    
+    if ((result as any).affectedRows === 0) {
+      throw new Error(`图片不存在: ${id}`);
+    }
+    
+    // 获取更新后的数据
+    const [rows] = await this.connection!.execute('SELECT * FROM images WHERE id = ?', [id]);
+    const updatedImage = this.rowToSavedImage((rows as any[])[0]);
+    
+    const duration = Date.now() - startTime;
+    await this.logOperation('UPDATE', 'images', id, 'SUCCESS', null, duration);
+    
+    console.log(`图片更新成功: ${id}`);
+    return updatedImage;
+  }
+
+  /**
+   * 从解决后的数据中提取更新字段
+   * @private
+   */
+  private extractUpdatesFromResolvedData(resolvedData: any, currentData: SavedImage): Partial<SavedImage> {
+    const updates: Partial<SavedImage> = {};
+    
+    // 比较字段并提取差异
+    if (resolvedData.url !== currentData.url) {
+      updates.url = resolvedData.url;
+    }
+    if (resolvedData.originalUrl !== currentData.originalUrl) {
+      updates.originalUrl = resolvedData.originalUrl;
+    }
+    if (resolvedData.prompt !== currentData.prompt) {
+      updates.prompt = resolvedData.prompt;
+    }
+    if (JSON.stringify(resolvedData.tags) !== JSON.stringify(currentData.tags)) {
+      updates.tags = resolvedData.tags;
+    }
+    if (resolvedData.favorite !== currentData.favorite) {
+      updates.favorite = resolvedData.favorite;
+    }
+    if (resolvedData.ossKey !== currentData.ossKey) {
+      updates.ossKey = resolvedData.ossKey;
+    }
+    if (resolvedData.ossUploaded !== currentData.ossUploaded) {
+      updates.ossUploaded = resolvedData.ossUploaded;
+    }
+    
+    return updates;
   }
 
   /**
@@ -568,7 +671,7 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
-   * 保存 API 配置
+   * 保存 API 配置（带冲突检测）
    */
   async saveApiConfig(config: ApiConfig): Promise<void> {
     return this.executeWithRetry(async () => {
@@ -584,24 +687,37 @@ export class DatabaseServiceImpl implements DatabaseService {
         // 清理配置数据
         const cleanedConfig = this.cleanApiConfig(config);
         
-        // 加密敏感信息
-        const encryptedConfig = {
-          ...cleanedConfig,
-          apiKey: getEncryptionService().encrypt(cleanedConfig.apiKey)
-        };
+        // 获取当前配置进行冲突检测
+        const currentConfig = await this.getApiConfig();
+        if (currentConfig) {
+          const conflictInfo = conflictResolver.detectConflict(
+            { ...cleanedConfig, updatedAt: new Date() },
+            { ...currentConfig, updatedAt: new Date(0) }, // 假设当前配置较旧
+            'api_config',
+            'user_configs'
+          );
+          
+          if (conflictInfo) {
+            console.log('检测到 API 配置更新冲突');
+            
+            const resolution = conflictResolver.resolveConflict(
+              conflictInfo,
+              ConflictResolutionStrategy.LATEST_WINS
+            );
+            
+            if (resolution.resolved) {
+              console.log(`API 配置冲突已解决: ${resolution.message}`);
+              // 使用解决后的配置
+              const resolvedConfig = resolution.finalData;
+              return await this.performApiConfigSave(resolvedConfig, startTime);
+            } else {
+              console.warn(`API 配置冲突解决失败: ${resolution.message}`);
+            }
+          }
+        }
         
-        const sql = `
-          INSERT INTO user_configs (user_id, api_config, updated_at) 
-          VALUES ('default', ?, ?) 
-          ON DUPLICATE KEY UPDATE api_config = VALUES(api_config), updated_at = VALUES(updated_at)
-        `;
-        
-        await this.connection!.execute(sql, [JSON.stringify(encryptedConfig), new Date()]);
-        
-        const duration = Date.now() - startTime;
-        await this.logOperation('UPSERT', 'user_configs', 'default', 'SUCCESS', null, duration);
-        
-        console.log('API 配置保存成功');
+        // 没有冲突或冲突解决失败，执行正常保存
+        return await this.performApiConfigSave(cleanedConfig, startTime);
 
       } catch (error: any) {
         const duration = Date.now() - startTime;
@@ -609,6 +725,31 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw error;
       }
     }, '保存 API 配置');
+  }
+
+  /**
+   * 执行 API 配置保存操作
+   * @private
+   */
+  private async performApiConfigSave(config: ApiConfig, startTime: number): Promise<void> {
+    // 加密敏感信息
+    const encryptedConfig = {
+      ...config,
+      apiKey: getEncryptionService().encrypt(config.apiKey)
+    };
+    
+    const sql = `
+      INSERT INTO user_configs (user_id, api_config, updated_at) 
+      VALUES ('default', ?, ?) 
+      ON DUPLICATE KEY UPDATE api_config = VALUES(api_config), updated_at = VALUES(updated_at)
+    `;
+    
+    await this.connection!.execute(sql, [JSON.stringify(encryptedConfig), new Date()]);
+    
+    const duration = Date.now() - startTime;
+    await this.logOperation('UPSERT', 'user_configs', 'default', 'SUCCESS', null, duration);
+    
+    console.log('API 配置保存成功');
   }
 
   /**
@@ -703,7 +844,7 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
-   * 保存 OSS 配置
+   * 保存 OSS 配置（带冲突检测）
    */
   async saveOSSConfig(config: OSSConfig): Promise<void> {
     return this.executeWithRetry(async () => {
@@ -719,25 +860,37 @@ export class DatabaseServiceImpl implements DatabaseService {
         // 清理配置数据
         const cleanedConfig = this.cleanOSSConfig(config);
         
-        // 加密敏感信息
-        const encryptedConfig = {
-          ...cleanedConfig,
-          accessKeyId: getEncryptionService().encrypt(cleanedConfig.accessKeyId),
-          accessKeySecret: getEncryptionService().encrypt(cleanedConfig.accessKeySecret)
-        };
+        // 获取当前配置进行冲突检测
+        const currentConfig = await this.getOSSConfig();
+        if (currentConfig) {
+          const conflictInfo = conflictResolver.detectConflict(
+            { ...cleanedConfig, updatedAt: new Date() },
+            { ...currentConfig, updatedAt: new Date(0) }, // 假设当前配置较旧
+            'oss_config',
+            'user_configs'
+          );
+          
+          if (conflictInfo) {
+            console.log('检测到 OSS 配置更新冲突');
+            
+            const resolution = conflictResolver.resolveConflict(
+              conflictInfo,
+              ConflictResolutionStrategy.LATEST_WINS
+            );
+            
+            if (resolution.resolved) {
+              console.log(`OSS 配置冲突已解决: ${resolution.message}`);
+              // 使用解决后的配置
+              const resolvedConfig = resolution.finalData;
+              return await this.performOSSConfigSave(resolvedConfig, startTime);
+            } else {
+              console.warn(`OSS 配置冲突解决失败: ${resolution.message}`);
+            }
+          }
+        }
         
-        const sql = `
-          INSERT INTO user_configs (user_id, oss_config, updated_at) 
-          VALUES ('default', ?, ?) 
-          ON DUPLICATE KEY UPDATE oss_config = VALUES(oss_config), updated_at = VALUES(updated_at)
-        `;
-        
-        await this.connection!.execute(sql, [JSON.stringify(encryptedConfig), new Date()]);
-        
-        const duration = Date.now() - startTime;
-        await this.logOperation('UPSERT', 'user_configs', 'default', 'SUCCESS', null, duration);
-        
-        console.log('OSS 配置保存成功');
+        // 没有冲突或冲突解决失败，执行正常保存
+        return await this.performOSSConfigSave(cleanedConfig, startTime);
 
       } catch (error: any) {
         const duration = Date.now() - startTime;
@@ -745,6 +898,32 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw error;
       }
     }, '保存 OSS 配置');
+  }
+
+  /**
+   * 执行 OSS 配置保存操作
+   * @private
+   */
+  private async performOSSConfigSave(config: OSSConfig, startTime: number): Promise<void> {
+    // 加密敏感信息
+    const encryptedConfig = {
+      ...config,
+      accessKeyId: getEncryptionService().encrypt(config.accessKeyId),
+      accessKeySecret: getEncryptionService().encrypt(config.accessKeySecret)
+    };
+    
+    const sql = `
+      INSERT INTO user_configs (user_id, oss_config, updated_at) 
+      VALUES ('default', ?, ?) 
+      ON DUPLICATE KEY UPDATE oss_config = VALUES(oss_config), updated_at = VALUES(updated_at)
+    `;
+    
+    await this.connection!.execute(sql, [JSON.stringify(encryptedConfig), new Date()]);
+    
+    const duration = Date.now() - startTime;
+    await this.logOperation('UPSERT', 'user_configs', 'default', 'SUCCESS', null, duration);
+    
+    console.log('OSS 配置保存成功');
   }
 
   /**
@@ -967,11 +1146,168 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
-   * 数据库迁移（暂时简单实现）
+   * 数据库迁移到指定版本
    */
-  async migrateSchema(version: string): Promise<void> {
-    console.log(`数据库迁移到版本 ${version}（暂未实现）`);
-    // TODO: 实现具体的迁移逻辑
+  async migrateSchema(version: string): Promise<MigrationResult> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        if (!this.connection || !this.migrator) {
+          throw new Error('数据库未连接或迁移器未初始化');
+        }
+
+        console.log(`开始迁移数据库到版本 ${version}...`);
+        
+        const result = await this.migrator.migrateToVersion(version);
+        
+        const duration = Date.now() - startTime;
+        const status = result.success ? 'SUCCESS' : 'FAILED';
+        
+        await this.logOperation('MIGRATE', 'database', version, status, result.error, duration);
+        
+        if (result.success) {
+          console.log(`数据库迁移成功到版本 ${version}`);
+        } else {
+          console.error(`数据库迁移失败:`, result.error);
+        }
+        
+        return result;
+
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('MIGRATE', 'database', version, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '数据库迁移');
+  }
+
+  /**
+   * 回滚数据库到指定版本
+   */
+  async rollbackToVersion(version: string): Promise<MigrationResult> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        if (!this.connection || !this.migrator) {
+          throw new Error('数据库未连接或迁移器未初始化');
+        }
+
+        console.log(`开始回滚数据库到版本 ${version}...`);
+        
+        const result = await this.migrator.rollbackToVersion(version);
+        
+        const duration = Date.now() - startTime;
+        const status = result.success ? 'SUCCESS' : 'FAILED';
+        
+        await this.logOperation('ROLLBACK', 'database', version, status, result.error, duration);
+        
+        if (result.success) {
+          console.log(`数据库回滚成功到版本 ${version}`);
+        } else {
+          console.error(`数据库回滚失败:`, result.error);
+        }
+        
+        return result;
+
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('ROLLBACK', 'database', version, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '数据库回滚');
+  }
+
+  /**
+   * 获取当前数据库版本
+   */
+  async getCurrentDatabaseVersion(): Promise<string | null> {
+    return this.executeWithRetry(async () => {
+      if (!this.migrator) {
+        throw new Error('迁移器未初始化');
+      }
+
+      return await this.migrator.getCurrentVersion();
+    }, '获取数据库版本');
+  }
+
+  /**
+   * 获取版本比较结果
+   */
+  async getVersionComparison(targetVersion: string): Promise<VersionComparison> {
+    return this.executeWithRetry(async () => {
+      if (!this.migrator) {
+        throw new Error('迁移器未初始化');
+      }
+
+      return await this.migrator.getVersionComparison(targetVersion);
+    }, '版本比较');
+  }
+
+  /**
+   * 获取所有可用版本
+   */
+  getAvailableVersions(): any[] {
+    if (!this.migrator) {
+      return [];
+    }
+
+    return this.migrator.getAvailableVersions();
+  }
+
+  /**
+   * 获取最新版本
+   */
+  getLatestVersion(): string {
+    if (!this.migrator) {
+      return '1.0.0';
+    }
+
+    return this.migrator.getLatestVersion();
+  }
+
+  /**
+   * 获取迁移历史
+   */
+  async getMigrationHistory(limit: number = 50): Promise<any[]> {
+    return this.executeWithRetry(async () => {
+      if (!this.migrator) {
+        throw new Error('迁移器未初始化');
+      }
+
+      return await this.migrator.getMigrationHistory(limit);
+    }, '获取迁移历史');
+  }
+
+  /**
+   * 验证数据库完整性
+   */
+  async validateDatabaseIntegrity(): Promise<{
+    valid: boolean;
+    issues: string[];
+    recommendations: string[];
+  }> {
+    return this.executeWithRetry(async () => {
+      if (!this.migrator) {
+        throw new Error('迁移器未初始化');
+      }
+
+      return await this.migrator.validateDatabaseIntegrity();
+    }, '验证数据库完整性');
+  }
+
+  /**
+   * 清理过期的迁移日志
+   */
+  async cleanupMigrationLogs(daysToKeep: number = 30): Promise<number> {
+    return this.executeWithRetry(async () => {
+      if (!this.migrator) {
+        throw new Error('迁移器未初始化');
+      }
+
+      return await this.migrator.cleanupMigrationLogs(daysToKeep);
+    }, '清理迁移日志');
   }
 
   /**
@@ -1061,10 +1397,452 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
+   * 获取冲突解决统计信息
+   */
+  getConflictStats(): {
+    total: number;
+    byType: Record<string, number>;
+    byTable: Record<string, number>;
+    recent: number;
+  } {
+    return conflictResolver.getConflictStats();
+  }
+
+  /**
+   * 获取冲突日志
+   */
+  getConflictLogs(limit?: number): any[] {
+    return conflictResolver.getConflictLogs(limit);
+  }
+
+  /**
+   * 清除冲突日志
+   */
+  clearConflictLogs(): void {
+    conflictResolver.clearConflictLogs();
+  }
+
+  /**
    * 延迟函数
    */
   private delay(ms: number): Promise<void> {
     return delay(ms);
+  }
+
+  // ==================== 连接状态监控方法 ====================
+
+  /**
+   * 开始连接状态监控
+   */
+  startConnectionMonitoring(): void {
+    this.connectionMonitor.startMonitoring();
+  }
+
+  /**
+   * 停止连接状态监控
+   */
+  stopConnectionMonitoring(): void {
+    this.connectionMonitor.stopMonitoring();
+  }
+
+  /**
+   * 添加连接状态变化监听器
+   */
+  addConnectionStatusListener(listener: ConnectionStatusListener): void {
+    this.connectionMonitor.addStatusListener(listener);
+  }
+
+  /**
+   * 移除连接状态变化监听器
+   */
+  removeConnectionStatusListener(listener: ConnectionStatusListener): void {
+    this.connectionMonitor.removeStatusListener(listener);
+  }
+
+  /**
+   * 获取连接质量统计
+   */
+  getConnectionQualityStats() {
+    return this.connectionMonitor.getQualityStats();
+  }
+
+  /**
+   * 获取连接状态变化历史
+   */
+  getConnectionStatusHistory(limit?: number) {
+    return this.connectionMonitor.getStatusHistory(limit);
+  }
+
+  /**
+   * 获取当前连接质量
+   */
+  getCurrentConnectionQuality() {
+    return this.connectionMonitor.getCurrentQuality();
+  }
+
+  /**
+   * 手动触发连接测试
+   */
+  async triggerConnectionTest() {
+    return await this.connectionMonitor.triggerConnectionTest();
+  }
+
+  /**
+   * 设置监控间隔
+   */
+  setConnectionMonitoringInterval(intervalMs: number): void {
+    this.connectionMonitor.setMonitoringInterval(intervalMs);
+  }
+
+  /**
+   * 获取监控状态
+   */
+  getConnectionMonitoringStatus() {
+    return this.connectionMonitor.getMonitoringStatus();
+  }
+
+  /**
+   * 重置连接质量统计
+   */
+  resetConnectionQualityStats(): void {
+    this.connectionMonitor.resetQualityStats();
+  }
+
+  /**
+   * 清除连接状态历史
+   */
+  clearConnectionStatusHistory(): void {
+    this.connectionMonitor.clearStatusHistory();
+  }
+
+  // ==================== 统计和分析功能 ====================
+
+  /**
+   * 获取图片统计信息
+   */
+  async getImageStatistics(filter?: StatisticsFilter): Promise<ImageStatistics> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        // 构建基础查询条件
+        const whereConditions: string[] = [];
+        const queryParams: any[] = [];
+        
+        // 应用筛选条件
+        if (filter) {
+          if (filter.dateRange) {
+            whereConditions.push('created_at BETWEEN ? AND ?');
+            queryParams.push(filter.dateRange.start, filter.dateRange.end);
+          }
+          
+          if (filter.models && filter.models.length > 0) {
+            whereConditions.push(`model IN (${filter.models.map(() => '?').join(', ')})`);
+            queryParams.push(...filter.models);
+          }
+          
+          if (filter.favorite !== undefined) {
+            whereConditions.push('favorite = ?');
+            queryParams.push(Boolean(filter.favorite));
+          }
+          
+          if (filter.ossUploaded !== undefined) {
+            whereConditions.push('oss_uploaded = ?');
+            queryParams.push(Boolean(filter.ossUploaded));
+          }
+          
+          if (filter.userId) {
+            whereConditions.push('user_id = ?');
+            queryParams.push(filter.userId);
+          } else {
+            whereConditions.push('user_id = ?');
+            queryParams.push('default');
+          }
+        } else {
+          whereConditions.push('user_id = ?');
+          queryParams.push('default');
+        }
+        
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        
+        // 1. 获取基础统计信息
+        const basicStatsSql = `
+          SELECT 
+            COUNT(*) as totalImages,
+            SUM(CASE WHEN favorite = 1 THEN 1 ELSE 0 END) as favoriteImages,
+            SUM(CASE WHEN oss_uploaded = 1 THEN 1 ELSE 0 END) as uploadedToOSS,
+            SUM(CASE WHEN oss_uploaded = 0 THEN 1 ELSE 0 END) as pendingOSSUpload
+          FROM images ${whereClause}
+        `;
+        
+        const [basicStatsRows] = await this.connection!.execute(basicStatsSql, queryParams);
+        const basicStats = (basicStatsRows as any[])[0];
+        
+        // 2. 按模型统计
+        const modelStatsSql = `
+          SELECT model, COUNT(*) as count 
+          FROM images ${whereClause}
+          GROUP BY model
+          ORDER BY count DESC
+        `;
+        
+        const [modelStatsRows] = await this.connection!.execute(modelStatsSql, queryParams);
+        const byModel: Record<string, number> = {};
+        (modelStatsRows as any[]).forEach(row => {
+          byModel[row.model] = row.count;
+        });
+        
+        // 3. 按时间范围统计
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const thisWeek = new Date(today.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
+        const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const thisYear = new Date(now.getFullYear(), 0, 1);
+        
+        const timeRangeStatsSql = `
+          SELECT 
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as today,
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as thisWeek,
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as thisMonth,
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as thisYear
+          FROM images ${whereClause}
+        `;
+        
+        const timeRangeParams = [today, thisWeek, thisMonth, thisYear, ...queryParams];
+        const [timeRangeRows] = await this.connection!.execute(timeRangeStatsSql, timeRangeParams);
+        const timeRangeStats = (timeRangeRows as any[])[0];
+        
+        // 构建结果
+        const statistics: ImageStatistics = {
+          totalImages: basicStats.totalImages || 0,
+          favoriteImages: basicStats.favoriteImages || 0,
+          uploadedToOSS: basicStats.uploadedToOSS || 0,
+          pendingOSSUpload: basicStats.pendingOSSUpload || 0,
+          byModel,
+          byTimeRange: {
+            today: timeRangeStats.today || 0,
+            thisWeek: timeRangeStats.thisWeek || 0,
+            thisMonth: timeRangeStats.thisMonth || 0,
+            thisYear: timeRangeStats.thisYear || 0
+          },
+          byStatus: {
+            favorite: basicStats.favoriteImages || 0,
+            uploaded: basicStats.uploadedToOSS || 0,
+            pending: basicStats.pendingOSSUpload || 0
+          }
+        };
+        
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'images', null, 'SUCCESS', null, duration);
+        
+        console.log('图片统计信息获取成功:', statistics);
+        return statistics;
+
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'images', null, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '获取图片统计信息');
+  }
+
+  /**
+   * 获取数据库统计信息
+   */
+  async getDatabaseStatistics(filter?: StatisticsFilter): Promise<DatabaseStatistics> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        // 1. 获取图片统计
+        const imageStats = await this.getImageStatistics(filter);
+        
+        // 2. 获取操作统计
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        
+        const operationStatsSql = `
+          SELECT 
+            COUNT(*) as totalOperations,
+            SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) as successfulOperations,
+            SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failedOperations,
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recentOperations
+          FROM operation_logs
+        `;
+        
+        const [operationStatsRows] = await this.connection!.execute(operationStatsSql, [oneHourAgo]);
+        const operationStats = (operationStatsRows as any[])[0];
+        
+        // 按操作类型统计
+        const operationTypeStatsSql = `
+          SELECT operation, COUNT(*) as count 
+          FROM operation_logs 
+          GROUP BY operation
+          ORDER BY count DESC
+        `;
+        
+        const [operationTypeRows] = await this.connection!.execute(operationTypeStatsSql);
+        const byOperation: Record<string, number> = {};
+        (operationTypeRows as any[]).forEach(row => {
+          byOperation[row.operation] = row.count;
+        });
+        
+        // 3. 获取性能统计
+        const performanceStatsSql = `
+          SELECT 
+            AVG(duration) as averageResponseTime,
+            MAX(duration) as slowestOperation,
+            MIN(duration) as fastestOperation
+          FROM operation_logs 
+          WHERE duration IS NOT NULL AND duration > 0
+        `;
+        
+        const [performanceRows] = await this.connection!.execute(performanceStatsSql);
+        const performanceStats = (performanceRows as any[])[0];
+        
+        // 4. 存储统计（估算）
+        const storageStats = {
+          totalSize: imageStats.totalImages * 1024 * 1024, // 假设每张图片平均1MB
+          averageImageSize: 1024 * 1024, // 1MB
+          largestImage: 5 * 1024 * 1024 // 假设最大5MB
+        };
+        
+        // 构建完整统计结果
+        const statistics: DatabaseStatistics = {
+          images: imageStats,
+          operations: {
+            totalOperations: operationStats.totalOperations || 0,
+            successfulOperations: operationStats.successfulOperations || 0,
+            failedOperations: operationStats.failedOperations || 0,
+            recentOperations: operationStats.recentOperations || 0,
+            byOperation
+          },
+          storage: storageStats,
+          performance: {
+            averageResponseTime: performanceStats.averageResponseTime || 0,
+            slowestOperation: performanceStats.slowestOperation || 0,
+            fastestOperation: performanceStats.fastestOperation || 0
+          }
+        };
+        
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'database', null, 'SUCCESS', null, duration);
+        
+        console.log('数据库统计信息获取成功');
+        return statistics;
+
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'database', null, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '获取数据库统计信息');
+  }
+
+  /**
+   * 获取操作日志（分页）
+   */
+  async getOperationLogs(pagination: PaginationOptions): Promise<PaginatedResult<OperationLog>> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        // 构建查询条件
+        const whereConditions: string[] = [];
+        const queryParams: any[] = [];
+        
+        if (pagination.filters) {
+          for (const [key, value] of Object.entries(pagination.filters)) {
+            if (value === null || value === undefined) continue;
+            
+            switch (key) {
+              case 'operation':
+                whereConditions.push('operation = ?');
+                queryParams.push(value);
+                break;
+              case 'status':
+                whereConditions.push('status = ?');
+                queryParams.push(value);
+                break;
+              case 'tableName':
+                whereConditions.push('table_name = ?');
+                queryParams.push(value);
+                break;
+              case 'userId':
+                whereConditions.push('user_id = ?');
+                queryParams.push(value);
+                break;
+              case 'dateRange':
+                if (value.start && value.end) {
+                  whereConditions.push('created_at BETWEEN ? AND ?');
+                  queryParams.push(value.start, value.end);
+                }
+                break;
+            }
+          }
+        }
+        
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        
+        // 构建排序
+        const allowedSortFields = ['id', 'created_at', 'operation', 'status', 'duration'];
+        const sortBy = allowedSortFields.includes(pagination.sortBy || '') ? pagination.sortBy : 'created_at';
+        const sortOrder = pagination.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+        const orderClause = `ORDER BY ${sortBy} ${sortOrder}`;
+        
+        // 分页参数
+        const offset = (pagination.page - 1) * pagination.pageSize;
+        const limitClause = 'LIMIT ? OFFSET ?';
+        
+        // 查询总数
+        const countSql = `SELECT COUNT(*) as total FROM operation_logs ${whereClause}`;
+        const [countRows] = await this.connection!.execute(countSql, queryParams);
+        const total = (countRows as any[])[0].total;
+        
+        // 查询数据
+        const dataSql = `
+          SELECT * FROM operation_logs 
+          ${whereClause} 
+          ${orderClause} 
+          ${limitClause}
+        `;
+        const dataParams = [...queryParams, pagination.pageSize, offset];
+        const [dataRows] = await this.connection!.execute(dataSql, dataParams);
+        
+        // 转换数据格式
+        const logs = (dataRows as any[]).map(row => ({
+          id: row.id.toString(),
+          operation: row.operation,
+          tableName: row.table_name,
+          recordId: row.record_id,
+          userId: row.user_id,
+          status: row.status as 'SUCCESS' | 'FAILED',
+          errorMessage: row.error_message,
+          createdAt: new Date(row.created_at),
+          duration: row.duration
+        }));
+        
+        const result: PaginatedResult<OperationLog> = {
+          data: logs,
+          total,
+          page: pagination.page,
+          pageSize: pagination.pageSize,
+          totalPages: Math.ceil(total / pagination.pageSize),
+          hasNext: pagination.page < Math.ceil(total / pagination.pageSize),
+          hasPrev: pagination.page > 1
+        };
+        
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'operation_logs', null, 'SUCCESS', null, duration);
+        
+        console.log(`获取操作日志成功: ${logs.length} 条记录`);
+        return result;
+
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'operation_logs', null, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '获取操作日志');
   }
 }
 

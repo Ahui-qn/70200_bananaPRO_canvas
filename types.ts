@@ -194,6 +194,42 @@ export interface EncryptionService {
   verifyPassword(password: string, hash: string): boolean;
 }
 
+// 数据库版本管理相关类型
+export interface DatabaseVersion {
+  version: string;                    // 版本号（如 "1.0.0"）
+  description: string;                // 版本描述
+  releaseDate: Date;                  // 发布日期
+  scripts: MigrationScript[];         // 迁移脚本列表
+  rollbackScripts?: MigrationScript[]; // 回滚脚本列表（可选）
+}
+
+export interface MigrationScript {
+  id: string;                         // 脚本唯一标识符
+  name: string;                       // 脚本名称
+  description: string;                // 脚本描述
+  sql: string;                        // SQL 语句
+  checksum?: string;                  // 脚本校验和
+  executionOrder: number;             // 执行顺序
+}
+
+export interface MigrationResult {
+  success: boolean;                   // 是否成功
+  version: string;                    // 目标版本
+  executedScripts: string[];          // 已执行的脚本ID列表
+  failedScript?: string;              // 失败的脚本ID
+  error?: string;                     // 错误信息
+  duration: number;                   // 执行耗时（毫秒）
+  rollbackAvailable: boolean;         // 是否支持回滚
+}
+
+export interface VersionComparison {
+  current: string;                    // 当前版本
+  target: string;                     // 目标版本
+  needsUpgrade: boolean;              // 是否需要升级
+  needsDowngrade: boolean;            // 是否需要降级
+  migrationPath: string[];            // 迁移路径（版本列表）
+}
+
 // 数据库服务接口
 export interface DatabaseService {
   // 连接管理
@@ -201,6 +237,20 @@ export interface DatabaseService {
   disconnect(): Promise<void>;
   testConnection(): Promise<boolean>;
   getConnectionStatus(): ConnectionStatus;
+  
+  // 连接状态监控
+  startConnectionMonitoring(): void;
+  stopConnectionMonitoring(): void;
+  addConnectionStatusListener(listener: any): void;
+  removeConnectionStatusListener(listener: any): void;
+  getConnectionQualityStats(): any;
+  getConnectionStatusHistory(limit?: number): any[];
+  getCurrentConnectionQuality(): any;
+  triggerConnectionTest(): Promise<any>;
+  setConnectionMonitoringInterval(intervalMs: number): void;
+  getConnectionMonitoringStatus(): any;
+  resetConnectionQualityStats(): void;
+  clearConnectionStatusHistory(): void;
   
   // 图片数据操作
   saveImage(image: SavedImage): Promise<SavedImage>;
@@ -222,9 +272,28 @@ export interface DatabaseService {
   deleteAllConfigs(requireConfirmation?: boolean): Promise<void>;
   clearUserData(requireConfirmation?: boolean): Promise<void>;
   
+  // 统计和分析功能
+  getImageStatistics(filter?: StatisticsFilter): Promise<ImageStatistics>;
+  getDatabaseStatistics(filter?: StatisticsFilter): Promise<DatabaseStatistics>;
+  getOperationLogs(pagination: PaginationOptions): Promise<PaginatedResult<OperationLog>>;
+  
   // 表结构管理
   initializeTables(): Promise<void>;
-  migrateSchema(version: string): Promise<void>;
+  migrateSchema(version: string): Promise<MigrationResult>;
+  
+  // 数据库版本管理
+  getCurrentDatabaseVersion(): Promise<string | null>;
+  getVersionComparison(targetVersion: string): Promise<VersionComparison>;
+  rollbackToVersion(version: string): Promise<MigrationResult>;
+  getAvailableVersions(): DatabaseVersion[];
+  getLatestVersion(): string;
+  getMigrationHistory(limit?: number): Promise<any[]>;
+  validateDatabaseIntegrity(): Promise<{
+    valid: boolean;
+    issues: string[];
+    recommendations: string[];
+  }>;
+  cleanupMigrationLogs(daysToKeep?: number): Promise<number>;
 }
 
 // 云函数API接口
@@ -267,6 +336,58 @@ export interface DatabaseErrorHandler {
     byCode: Record<string, number>;
     recent: number;
   };
+}
+
+// 数据统计接口
+export interface ImageStatistics {
+  totalImages: number;                  // 图片总数
+  favoriteImages: number;               // 收藏图片数
+  uploadedToOSS: number;                // 已上传到OSS的图片数
+  pendingOSSUpload: number;             // 待上传到OSS的图片数
+  byModel: Record<string, number>;      // 按模型分组统计
+  byTimeRange: {
+    today: number;                      // 今日新增
+    thisWeek: number;                   // 本周新增
+    thisMonth: number;                  // 本月新增
+    thisYear: number;                   // 本年新增
+  };
+  byStatus: {
+    favorite: number;                   // 收藏状态
+    uploaded: number;                   // 上传状态
+    pending: number;                    // 待处理状态
+  };
+}
+
+export interface DatabaseStatistics {
+  images: ImageStatistics;              // 图片统计
+  operations: {
+    totalOperations: number;            // 总操作数
+    successfulOperations: number;       // 成功操作数
+    failedOperations: number;           // 失败操作数
+    recentOperations: number;           // 最近1小时操作数
+    byOperation: Record<string, number>; // 按操作类型统计
+  };
+  storage: {
+    totalSize: number;                  // 总存储大小（估算）
+    averageImageSize: number;           // 平均图片大小
+    largestImage: number;               // 最大图片大小
+  };
+  performance: {
+    averageResponseTime: number;        // 平均响应时间
+    slowestOperation: number;           // 最慢操作时间
+    fastestOperation: number;           // 最快操作时间
+  };
+}
+
+export interface StatisticsFilter {
+  dateRange?: {
+    start: Date;
+    end: Date;
+  };
+  models?: string[];                    // 筛选特定模型
+  favorite?: boolean;                   // 筛选收藏状态
+  ossUploaded?: boolean;                // 筛选上传状态
+  userId?: string;                      // 筛选用户（默认为'default'）
 }
 
 // 环境变量类型
