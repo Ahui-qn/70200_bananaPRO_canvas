@@ -73,7 +73,13 @@ app.get('/api/config/api', (req, res) => {
   const response: ApiResponse = {
     success: true,
     message: 'API 配置获取成功',
-    data: null // 暂时返回空配置
+    data: {
+      apiKey: process.env.NANO_BANANA_API_KEY || '',
+      baseUrl: process.env.NANO_BANANA_API_URL || 'https://grsai.dakka.com.cn/v1/draw',
+      timeout: 300000,
+      retryCount: 3,
+      provider: 'Nano Banana'
+    }
   };
   res.json(response);
 });
@@ -92,7 +98,15 @@ app.get('/api/config/oss', (req, res) => {
   const response: ApiResponse = {
     success: true,
     message: 'OSS 配置获取成功',
-    data: null // 暂时返回空配置
+    data: {
+      region: process.env.OSS_REGION || 'oss-cn-shenzhen',
+      bucket: process.env.OSS_BUCKET || '',
+      accessKeyId: process.env.OSS_ACCESS_KEY_ID || '',
+      accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET ? '******' : '', // 出于安全考虑，不返回完整密钥
+      endpoint: process.env.OSS_ENDPOINT || '',
+      customDomain: process.env.OSS_CUSTOM_DOMAIN || '',
+      enabled: !!(process.env.OSS_BUCKET && process.env.OSS_ACCESS_KEY_ID)
+    }
   };
   res.json(response);
 });
@@ -143,13 +157,24 @@ app.post('/api/config/test-database', (req, res) => {
 });
 
 app.get('/api/database/status', (req, res) => {
+  const isConfigured = !!(process.env.DB_HOST && process.env.DB_USERNAME && process.env.DB_DATABASE);
   const response: ApiResponse = {
     success: true,
-    message: '数据库 API 已就绪',
+    message: '数据库状态获取成功',
     data: {
-      isConnected: false,
-      connectionInfo: '未连接',
-      status: 'disconnected'
+      isConnected: false, // 实际连接状态需要真正连接数据库后才能确定
+      isConfigured: isConfigured,
+      connectionInfo: isConfigured 
+        ? `${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_DATABASE}`
+        : '未配置',
+      status: isConfigured ? 'configured' : 'not_configured',
+      config: isConfigured ? {
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT || '3306',
+        database: process.env.DB_DATABASE,
+        username: process.env.DB_USERNAME,
+        ssl: process.env.DB_SSL === 'true'
+      } : null
     }
   };
   res.json(response);

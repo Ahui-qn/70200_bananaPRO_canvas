@@ -33,7 +33,7 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
     connectionInfo?: string;
   }>({ isConnected: false });
 
-  // 加载数据库状态
+  // 加载数据库状态和配置
   useEffect(() => {
     if (isOpen) {
       loadDatabaseStatus();
@@ -48,6 +48,19 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
           isConnected: response.data.isConnected || false,
           connectionInfo: response.data.connectionInfo
         });
+        
+        // 如果后端返回了配置数据，更新表单
+        if (response.data.config) {
+          setConfig(prev => ({
+            ...prev,
+            host: response.data.config.host || prev.host,
+            port: parseInt(response.data.config.port) || prev.port,
+            database: response.data.config.database || prev.database,
+            username: response.data.config.username || prev.username,
+            ssl: response.data.config.ssl || prev.ssl,
+            enabled: response.data.isConfigured || false
+          }));
+        }
       }
     } catch (error: any) {
       console.warn('加载数据库状态失败:', error);
