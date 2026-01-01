@@ -1,6 +1,7 @@
 import express from 'express';
 import { ApiResponse, PaginatedResponse, SavedImage, GetImagesRequest, CreateImageRequest, UpdateImageRequest } from '@shared/types';
 import { databaseService } from '../services/databaseService.js';
+import { aliOssService } from '../services/aliOssService.js';
 
 const router = express.Router();
 
@@ -149,9 +150,32 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// 删除图片
+// 删除图片（同时删除 OSS 文件）
 router.delete('/:id', async (req, res) => {
   try {
+    // 先获取图片信息，以便删除 OSS 文件
+    const image = await databaseService.getImageById(req.params.id);
+    
+    if (!image) {
+      const response: ApiResponse = {
+        success: false,
+        error: '图片不存在'
+      };
+      return res.status(404).json(response);
+    }
+
+    // 如果图片已上传到 OSS，先删除 OSS 文件
+    if (image.ossUploaded && image.ossKey && aliOssService.isConfigured()) {
+      try {
+        await aliOssService.deleteObject(image.ossKey);
+        console.log('OSS 文件删除成功:', image.ossKey);
+      } catch (ossError: any) {
+        console.warn('删除 OSS 文件失败:', ossError.message);
+        // OSS 删除失败不阻止数据库删除
+      }
+    }
+
+    // 删除数据库记录
     await databaseService.deleteImage(req.params.id);
 
     const response: ApiResponse = {
@@ -170,7 +194,7 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// 批量删除图片
+// 批量删除图片（同时删除 OSS 文件）
 router.delete('/', async (req, res) => {
   try {
     const { ids } = req.body;
@@ -183,12 +207,37 @@ router.delete('/', async (req, res) => {
       return res.status(400).json(response);
     }
 
+    let ossDeleteSuccess = 0;
+    let ossDeleteFailed = 0;
+
+    // 先获取所有图片信息并删除 OSS 文件
+    for (const id of ids) {
+      try {
+        const image = await databaseService.getImageById(id);
+        if (image && image.ossUploaded && image.ossKey && aliOssService.isConfigured()) {
+          try {
+            await aliOssService.deleteObject(image.ossKey);
+            ossDeleteSuccess++;
+          } catch (ossError) {
+            ossDeleteFailed++;
+          }
+        }
+      } catch (e) {
+        // 忽略获取图片信息的错误
+      }
+    }
+
+    // 删除数据库记录
     const result = await databaseService.deleteImages(ids);
 
     const response: ApiResponse = {
       success: true,
-      data: result,
-      message: `批量删除完成：成功 ${result.success} 张，失败 ${result.failed} 张`
+      data: {
+        ...result,
+        ossDeleteSuccess,
+        ossDeleteFailed
+      },
+      message: `批量删除完成：数据库成功 ${result.success} 张，失败 ${result.failed} 张；OSS 成功 ${ossDeleteSuccess} 张，失败 ${ossDeleteFailed} 张`
     };
 
     res.json(response);

@@ -274,6 +274,13 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
+   * 获取数据库连接实例（供其他服务使用）
+   */
+  getConnection(): mysql.Connection | null {
+    return this.connection;
+  }
+
+  /**
    * 带重试机制的数据库操作执行器
    */
   private async executeWithRetry<T>(
@@ -420,8 +427,9 @@ export class DatabaseServiceImpl implements DatabaseService {
         const total = (countRows as any[])[0].total;
         
         // 查询数据 - 直接将数字嵌入 SQL（因为 MySQL prepared statement 对 LIMIT/OFFSET 有限制）
+        // 注意：不查询 ref_images 字段以避免排序内存问题
         const dataSql = `
-          SELECT * FROM images 
+          SELECT id, url, prompt, model, aspect_ratio, image_size, tags, favorite, oss_uploaded, oss_key, created_at, updated_at FROM images 
           ${whereClause} 
           ${orderClause} 
           LIMIT ${pageSize} OFFSET ${offset}
@@ -615,6 +623,38 @@ export class DatabaseServiceImpl implements DatabaseService {
     }
     
     return updates;
+  }
+
+  /**
+   * 根据 ID 获取单张图片（包含完整的 ref_images 信息）
+   */
+  async getImageById(id: string): Promise<SavedImage | null> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        // 查询完整的图片信息，包括 ref_images
+        const [rows] = await this.connection!.execute(
+          'SELECT * FROM images WHERE id = ?',
+          [id]
+        );
+        
+        if ((rows as any[]).length === 0) {
+          return null;
+        }
+        
+        const image = this.rowToSavedImage((rows as any[])[0]);
+        
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'images', id, 'SUCCESS', null, duration);
+        
+        return image;
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('SELECT', 'images', id, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '获取单张图片');
   }
 
   /**

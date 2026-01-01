@@ -19,36 +19,24 @@ function getApiConfigFromEnv() {
 
 /**
  * 从环境变量获取数据库配置（只读）
- * 敏感信息会被部分隐藏
+ * 只展示主机地址、端口和数据库名称，隐藏敏感信息
  */
 function getDatabaseConfigFromEnv() {
-  const password = process.env.DB_PASSWORD || '';
   return {
     host: process.env.DB_HOST || '未配置',
     port: parseInt(process.env.DB_PORT || '3306'),
     database: process.env.DB_DATABASE || '未配置',
-    username: process.env.DB_USERNAME || '未配置',
-    password: password ? '******' : '未配置',
-    passwordConfigured: !!password,
-    ssl: process.env.DB_SSL === 'true'
   };
 }
 
 /**
  * 从环境变量获取 OSS 配置（只读）
- * 敏感信息会被部分隐藏
+ * 只展示区域和存储桶名称，隐藏敏感信息
  */
 function getOSSConfigFromEnv() {
-  const accessKeyId = process.env.OSS_ACCESS_KEY_ID || '';
-  const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET || '';
   return {
     region: process.env.OSS_REGION || '未配置',
     bucket: process.env.OSS_BUCKET || '未配置',
-    endpoint: process.env.OSS_ENDPOINT || '未配置',
-    accessKeyId: accessKeyId ? `${accessKeyId.substring(0, 8)}...${accessKeyId.substring(accessKeyId.length - 4)}` : '未配置',
-    accessKeyIdConfigured: !!accessKeyId,
-    accessKeySecret: accessKeySecret ? '******' : '未配置',
-    accessKeySecretConfigured: !!accessKeySecret
   };
 }
 
@@ -129,6 +117,36 @@ router.get('/oss', async (_req, res) => {
     const response: ApiResponse = {
       success: false,
       error: error.message || '获取 OSS 配置失败'
+    };
+    res.status(500).json(response);
+  }
+});
+
+// 获取 OSS 连接状态
+router.get('/oss/status', async (_req, res) => {
+  try {
+    const accessKeyId = process.env.OSS_ACCESS_KEY_ID;
+    const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET;
+    const bucket = process.env.OSS_BUCKET;
+    const region = process.env.OSS_REGION;
+    
+    // 检查必要配置是否存在
+    const isConnected = !!(accessKeyId && accessKeySecret && bucket && region);
+    
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        isConnected,
+        message: isConnected ? 'OSS 配置完整' : 'OSS 配置不完整'
+      }
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('获取 OSS 状态失败:', error);
+    const response: ApiResponse = {
+      success: false,
+      error: error.message || '获取 OSS 状态失败'
     };
     res.status(500).json(response);
   }

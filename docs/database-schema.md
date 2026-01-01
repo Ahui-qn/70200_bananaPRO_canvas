@@ -161,6 +161,43 @@ JSON 数组格式示例：
 
 ---
 
+### 4. reference_images（参考图片表）
+
+存储去重后的参考图片信息，用于图生图功能。通过 SHA256 哈希实现去重，避免重复存储相同图片。
+
+| 字段名 | 类型 | 是否必填 | 默认值 | 说明 |
+|--------|------|----------|--------|------|
+| `id` | VARCHAR(50) | ✅ 必填 | - | 参考图片唯一标识符，主键 |
+| `hash` | VARCHAR(64) | ✅ 必填 | - | 图片内容 SHA256 哈希（唯一约束） |
+| `oss_key` | VARCHAR(255) | ✅ 必填 | - | OSS 对象存储键名 |
+| `oss_url` | TEXT | ✅ 必填 | - | OSS 访问 URL |
+| `original_name` | VARCHAR(255) | ❌ 可选 | NULL | 原始文件名 |
+| `size` | INT UNSIGNED | ✅ 必填 | - | 文件大小（字节） |
+| `mime_type` | VARCHAR(50) | ✅ 必填 | 'image/jpeg' | MIME 类型 |
+| `width` | INT UNSIGNED | ❌ 可选 | NULL | 图片宽度（像素） |
+| `height` | INT UNSIGNED | ❌ 可选 | NULL | 图片高度（像素） |
+| `use_count` | INT UNSIGNED | ❌ 可选 | 1 | 使用次数 |
+| `created_at` | TIMESTAMP | ❌ 可选 | CURRENT_TIMESTAMP | 创建时间 |
+| `last_used_at` | TIMESTAMP | ❌ 可选 | CURRENT_TIMESTAMP | 最后使用时间 |
+
+**索引：**
+| 索引名 | 字段 | 说明 |
+|--------|------|------|
+| PRIMARY | `id` | 主键索引 |
+| `uk_hash` | `hash` | 唯一索引，用于去重 |
+| `idx_ref_created_at` | `created_at` | 按创建时间查询优化 |
+| `idx_ref_use_count` | `use_count` | 按使用次数筛选 |
+| `idx_ref_last_used_at` | `last_used_at` | 按最后使用时间筛选 |
+
+**去重机制说明：**
+1. 上传参考图片时，先计算图片内容的 SHA256 哈希
+2. 查询数据库是否存在相同哈希的记录
+3. 如果存在，复用现有记录并增加 `use_count`
+4. 如果不存在，上传到 OSS 并创建新记录
+5. 这样可以避免相同图片重复上传，节省存储空间
+
+---
+
 ## 视图
 
 ### 1. recent_images（最近图片视图）
@@ -275,6 +312,7 @@ CALL CleanupOldImages();
 |------|------|----------|
 | 2024-12-30 | 1.0.0 | 初始版本，创建基础表结构 |
 | 2024-12-31 | 1.0.1 | 添加文档说明 |
+| 2026-01-01 | 1.1.0 | 添加 reference_images 表，实现参考图片去重存储 |
 
 ---
 

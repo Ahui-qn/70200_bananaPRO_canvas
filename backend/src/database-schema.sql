@@ -38,7 +38,29 @@ CREATE TABLE IF NOT EXISTS `user_configs` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户配置表';
 
--- 3. 同步日志表（可选，用于调试和监控）
+-- 3. 参考图片表（去重存储）
+CREATE TABLE IF NOT EXISTS `reference_images` (
+  `id` VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '参考图片唯一标识符',
+  `hash` VARCHAR(64) NOT NULL UNIQUE COMMENT '图片内容SHA256哈希（用于去重）',
+  `oss_key` VARCHAR(255) NOT NULL COMMENT 'OSS对象键名',
+  `oss_url` TEXT NOT NULL COMMENT 'OSS访问URL',
+  `original_name` VARCHAR(255) COMMENT '原始文件名',
+  `size` INT UNSIGNED NOT NULL COMMENT '文件大小（字节）',
+  `mime_type` VARCHAR(50) NOT NULL DEFAULT 'image/jpeg' COMMENT 'MIME类型',
+  `width` INT UNSIGNED COMMENT '图片宽度',
+  `height` INT UNSIGNED COMMENT '图片高度',
+  `use_count` INT UNSIGNED DEFAULT 1 COMMENT '使用次数',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `last_used_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后使用时间',
+  
+  -- 索引
+  INDEX `idx_hash` (`hash`),
+  INDEX `idx_created_at` (`created_at`),
+  INDEX `idx_use_count` (`use_count`),
+  INDEX `idx_last_used_at` (`last_used_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='参考图片表（去重存储）';
+
+-- 4. 同步日志表（可选，用于调试和监控）
 CREATE TABLE IF NOT EXISTS `sync_logs` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '日志ID',
   `operation` VARCHAR(50) NOT NULL COMMENT '操作类型（INSERT/UPDATE/DELETE/SYNC）',
@@ -144,3 +166,4 @@ DELIMITER ;
 SHOW CREATE TABLE images;
 SHOW CREATE TABLE user_configs;
 SHOW CREATE TABLE sync_logs;
+SHOW CREATE TABLE reference_images;

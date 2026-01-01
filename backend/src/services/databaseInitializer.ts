@@ -56,6 +56,9 @@ export class DatabaseInitializer {
       // 创建 operation_logs 表
       await this.createOperationLogsTable();
       
+      // 创建 reference_images 表
+      await this.createReferenceImagesTable();
+      
       // 创建索引
       await this.createIndexes();
       
@@ -166,6 +169,36 @@ export class DatabaseInitializer {
   }
 
   /**
+   * 创建 reference_images 表（参考图片去重存储）
+   */
+  private async createReferenceImagesTable(): Promise<void> {
+    console.log('创建 reference_images 表...');
+    
+    const sql = `
+      CREATE TABLE IF NOT EXISTS reference_images (
+        id VARCHAR(50) NOT NULL COMMENT '参考图片唯一标识符',
+        hash VARCHAR(64) NOT NULL COMMENT '图片内容SHA256哈希（用于去重）',
+        oss_key VARCHAR(255) NOT NULL COMMENT 'OSS对象键名',
+        oss_url TEXT NOT NULL COMMENT 'OSS访问URL',
+        original_name VARCHAR(255) COMMENT '原始文件名',
+        size INT UNSIGNED NOT NULL COMMENT '文件大小（字节）',
+        mime_type VARCHAR(50) NOT NULL DEFAULT 'image/jpeg' COMMENT 'MIME类型',
+        width INT UNSIGNED COMMENT '图片宽度',
+        height INT UNSIGNED COMMENT '图片高度',
+        use_count INT UNSIGNED DEFAULT 1 COMMENT '使用次数',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后使用时间',
+        
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_hash (hash)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='参考图片表（去重存储）'
+    `;
+    
+    await this.connection.execute(sql);
+    console.log('reference_images 表创建成功');
+  }
+
+  /**
    * 创建所有必要的索引
    * 使用兼容阿里云 MySQL 的语法（不使用 IF NOT EXISTS）
    */
@@ -188,6 +221,11 @@ export class DatabaseInitializer {
       [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_user_id', 'user_id'],
       [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_status', 'status'],
       [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_table_name', 'table_name'],
+      
+      // reference_images 表索引
+      ['reference_images', 'idx_ref_created_at', 'created_at'],
+      ['reference_images', 'idx_ref_use_count', 'use_count'],
+      ['reference_images', 'idx_ref_last_used_at', 'last_used_at'],
       
       // 复合索引
       [TABLE_NAMES.IMAGES, 'idx_images_user_favorite', 'user_id, favorite'],

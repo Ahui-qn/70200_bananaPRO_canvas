@@ -1,31 +1,314 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 /* 配置 Tailwind 扫描的内容路径 */
 @source "../index.html";
 @source "./";
 
-/* 自定义样式 */
+/* CSS 变量 */
+:root {
+  --glass-bg: rgba(24, 24, 27, 0.7);
+  --glass-border: rgba(63, 63, 70, 0.5);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --accent-primary: #8b5cf6;
+  --accent-secondary: #6366f1;
+  --dot-color: rgba(63, 63, 70, 0.4);
+  --dot-size: 1px;
+  --dot-spacing: 24px;
+}
+
+/* 基础样式 */
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: #09090b;
   color: #e4e4e7;
+  overflow: hidden;
+}
+
+/* 点矩阵背景 */
+.dot-matrix-bg {
+  background-image: radial-gradient(
+    circle,
+    var(--dot-color) var(--dot-size),
+    transparent var(--dot-size)
+  );
+  background-size: var(--dot-spacing) var(--dot-spacing);
+  background-position: center center;
+}
+
+/* 玻璃态效果 */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-subtle {
+  background: rgba(24, 24, 27, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(63, 63, 70, 0.3);
+}
+
+.glass-card {
+  background: rgba(24, 24, 27, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(63, 63, 70, 0.4);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+}
+
+/* 画布容器 */
+.canvas-container {
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.canvas-container:active {
+  cursor: grabbing;
+}
+
+.canvas-content {
+  transform-origin: center center;
+  transition: transform 0.1s ease-out;
 }
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #18181b; 
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46; 
-  border-radius: 4px;
+  background: rgba(63, 63, 70, 0.5);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b; 
+  background: rgba(82, 82, 91, 0.7);
+}
+
+/* 按钮悬停效果 */
+.btn-glass {
+  background: rgba(39, 39, 42, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(63, 63, 70, 0.5);
+  transition: all 0.2s ease;
+}
+
+.btn-glass:hover {
+  background: rgba(63, 63, 70, 0.6);
+  border-color: rgba(82, 82, 91, 0.6);
+  transform: translateY(-1px);
+}
+
+.btn-glass:active {
+  transform: translateY(0);
+}
+
+/* 主按钮渐变 */
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  box-shadow: 0 6px 24px rgba(139, 92, 246, 0.4);
+  transform: translateY(-2px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-primary:disabled {
+  background: rgba(63, 63, 70, 0.5);
+  box-shadow: none;
+  transform: none;
+}
+
+/* 输入框样式 */
+.input-glass {
+  background: rgba(24, 24, 27, 0.6);
+  border: 1px solid rgba(63, 63, 70, 0.5);
+  transition: all 0.2s ease;
+}
+
+.input-glass:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  outline: none;
+}
+
+/* 选择框样式 */
+.select-glass {
+  background: rgba(24, 24, 27, 0.6);
+  border: 1px solid rgba(63, 63, 70, 0.5);
+  transition: all 0.2s ease;
+}
+
+.select-glass:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  outline: none;
+}
+
+/* 标签按钮组 */
+.tag-btn {
+  background: rgba(39, 39, 42, 0.5);
+  border: 1px solid rgba(63, 63, 70, 0.4);
+  transition: all 0.15s ease;
+}
+
+.tag-btn:hover {
+  background: rgba(63, 63, 70, 0.5);
+  border-color: rgba(82, 82, 91, 0.5);
+}
+
+.tag-btn.active {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #a78bfa;
+}
+
+/* 图片卡片 */
+.image-card {
+  background: rgba(24, 24, 27, 0.5);
+  border: 1px solid rgba(63, 63, 70, 0.3);
+  transition: all 0.2s ease;
+}
+
+.image-card:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* 状态指示器动画 */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0);
+  }
+}
+
+.status-online {
+  animation: pulse-glow 2s infinite;
+}
+
+/* 加载动画 */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 2s linear infinite;
+}
+
+/* 淡入动画 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* 缩放控制器 */
+.zoom-controls {
+  background: rgba(24, 24, 27, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(63, 63, 70, 0.5);
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoom-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
+  color: #a1a1aa;
+  transition: all 0.15s ease;
+}
+
+.zoom-btn:hover {
+  background: rgba(63, 63, 70, 0.5);
+  color: #e4e4e7;
+}
+
+.zoom-slider {
+  width: 100px;
+  height: 4px;
+  background: rgba(63, 63, 70, 0.5);
+  border-radius: 2px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.zoom-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* 页面过渡 */
+.page-transition {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.page-enter {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.page-enter-active {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.page-exit {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.page-exit-active {
+  opacity: 0;
+  transform: translateX(-20px);
 }

@@ -33,7 +33,6 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
   } | null>(null);
   const [isConfigured, setIsConfigured] = useState(false);
 
-  // 加载现有配置
   useEffect(() => {
     if (isOpen) {
       loadConfig();
@@ -45,13 +44,14 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
       setLoading(true);
       const response = await apiService.getApiConfig();
       if (response.success && response.data) {
+        const data = response.data as any;
         setConfig({
-          apiKey: response.data.apiKey || '',
-          apiKeyConfigured: response.data.apiKeyConfigured || false,
-          baseUrl: response.data.baseUrl || '',
-          provider: response.data.provider || '',
+          apiKey: data.apiKey || '',
+          apiKeyConfigured: data.apiKeyConfigured || false,
+          baseUrl: data.baseUrl || '',
+          provider: data.provider || '',
         });
-        setIsConfigured(response.data.apiKeyConfigured || false);
+        setIsConfigured(data.apiKeyConfigured || false);
       }
     } catch (error: any) {
       console.warn('加载 API 配置失败:', error);
@@ -69,40 +69,44 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-zinc-900 rounded-xl border border-zinc-700 w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="glass-card rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden animate-fade-in">
         {/* 头部 */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-700">
+        <div className="flex items-center justify-between p-5 border-b border-zinc-800/50">
           <div className="flex items-center gap-3">
-            <Key className="w-5 h-5 text-purple-400" />
-            <h2 className="text-lg font-semibold text-zinc-100">API 配置</h2>
-            <Lock className="w-4 h-4 text-zinc-500" title="只读模式" />
+            <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
+              <Key className="w-5 h-5 text-violet-400" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-zinc-100">API 配置</h2>
+              <p className="text-xs text-zinc-500 flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                只读模式
+              </p>
+            </div>
           </div>
           <button
             onClick={handleClose}
-            className="p-1 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="btn-glass p-2 rounded-lg"
           >
-            <X className="w-5 h-5 text-zinc-400" />
+            <X className="w-4 h-4 text-zinc-400" />
           </button>
         </div>
 
-        {/* 只读提示 */}
-        <div className="px-6 py-3 bg-zinc-800/50 border-b border-zinc-700">
-          <p className="text-xs text-zinc-400 flex items-center gap-2">
-            <Lock className="w-3 h-3" />
-            配置从 .env 文件读取，如需修改请编辑 backend/.env 文件
-          </p>
-        </div>
-
-        {/* 内容 - 只读显示 */}
-        <div className="p-6 space-y-4">
+        {/* 内容 */}
+        <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh]">
           {loading ? (
-            <div className="text-center text-zinc-400 py-4">加载配置中...</div>
+            <div className="text-center py-8">
+              <div className="w-8 h-8 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-zinc-500">加载配置中...</p>
+            </div>
           ) : !isConfigured ? (
-            <div className="text-center text-zinc-400 py-4">
-              <AlertCircle className="w-8 h-8 mx-auto mb-2 text-yellow-500" />
-              <p>未配置 API Key</p>
-              <p className="text-xs mt-1">
+            <div className="text-center py-8">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center mx-auto mb-3">
+                <AlertCircle className="w-6 h-6 text-amber-400" />
+              </div>
+              <p className="text-zinc-300 font-medium">未配置 API Key</p>
+              <p className="text-xs text-zinc-500 mt-1">
                 请在 backend/.env 文件中配置 NANO_BANANA_API_KEY
               </p>
             </div>
@@ -110,7 +114,7 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
             <>
               {/* API Key */}
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">
+                <label className="block text-xs font-medium text-zinc-400 mb-2">
                   API Key
                 </label>
                 <div className="flex items-center gap-2">
@@ -118,37 +122,39 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
                     type="text"
                     value={config.apiKey}
                     readOnly
-                    className="flex-1 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg text-zinc-300 cursor-not-allowed font-mono text-sm"
+                    className="input-glass flex-1 px-3 py-2.5 rounded-xl text-zinc-300 cursor-not-allowed font-mono text-sm"
                   />
                   {config.apiKeyConfigured && (
-                    <CheckCircle className="w-5 h-5 text-green-400" />
+                    <div className="w-9 h-9 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                      <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    </div>
                   )}
                 </div>
               </div>
 
               {/* API 地址 */}
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">
+                <label className="block text-xs font-medium text-zinc-400 mb-2">
                   API 地址
                 </label>
                 <input
                   type="text"
                   value={config.baseUrl}
                   readOnly
-                  className="w-full px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg text-zinc-300 cursor-not-allowed"
+                  className="input-glass w-full px-3 py-2.5 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
                 />
               </div>
 
               {/* 提供商 */}
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">
+                <label className="block text-xs font-medium text-zinc-400 mb-2">
                   提供商
                 </label>
                 <input
                   type="text"
                   value={config.provider}
                   readOnly
-                  className="w-full px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg text-zinc-300 cursor-not-allowed"
+                  className="input-glass w-full px-3 py-2.5 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
                 />
               </div>
             </>
@@ -157,12 +163,12 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
           {/* 消息显示 */}
           {message && (
             <div
-              className={`flex items-center gap-2 p-3 rounded-lg ${
+              className={`flex items-center gap-2 p-3 rounded-xl text-sm ${
                 message.type === 'success'
-                  ? 'bg-green-600/20 text-green-300 border border-green-600/30'
+                  ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
                   : message.type === 'info'
-                    ? 'bg-blue-600/20 text-blue-300 border border-blue-600/30'
-                    : 'bg-red-600/20 text-red-300 border border-red-600/30'
+                    ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20'
+                    : 'bg-red-500/10 text-red-300 border border-red-500/20'
               }`}
             >
               {message.type === 'success' ? (
@@ -170,18 +176,18 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
               ) : (
                 <AlertCircle className="w-4 h-4" />
               )}
-              <span className="text-sm">{message.text}</span>
+              <span>{message.text}</span>
             </div>
           )}
 
           {/* 配置提示 */}
           {isConfigured && (
-            <div className="bg-purple-600/10 border border-purple-600/20 rounded-lg p-3">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-purple-400 mt-0.5" />
-                <div className="text-xs text-purple-300">
-                  <p className="font-medium mb-1">配置说明：</p>
-                  <ul className="space-y-1 text-purple-200">
+            <div className="glass-subtle rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-4 h-4 text-violet-400 mt-0.5 flex-shrink-0" />
+                <div className="text-xs text-zinc-400">
+                  <p className="font-medium text-zinc-300 mb-1.5">配置说明</p>
+                  <ul className="space-y-1">
                     <li>• API 配置从 .env 文件读取</li>
                     <li>• API Key 已部分隐藏以保护安全</li>
                     <li>• 如需修改请编辑 backend/.env</li>
@@ -193,10 +199,10 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
         </div>
 
         {/* 底部按钮 */}
-        <div className="flex items-center justify-end p-6 border-t border-zinc-700">
+        <div className="flex items-center justify-end p-5 border-t border-zinc-800/50">
           <button
             onClick={handleClose}
-            className="px-4 py-2 text-zinc-400 hover:text-zinc-100 transition-colors"
+            className="btn-glass px-4 py-2 rounded-xl text-sm text-zinc-300"
           >
             关闭
           </button>

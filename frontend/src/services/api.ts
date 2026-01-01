@@ -180,6 +180,10 @@ class ApiService {
     return this.request('/database/status');
   }
 
+  async getOSSStatus(): Promise<ApiResponse<{ isConnected: boolean }>> {
+    return this.request('/config/oss/status');
+  }
+
   async initDatabase(): Promise<ApiResponse> {
     return this.request('/database/init', {
       method: 'POST',

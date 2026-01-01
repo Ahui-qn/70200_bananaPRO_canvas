@@ -9,6 +9,7 @@ import imagesRouter from './routes/images.js';
 import configRouter from './routes/config.js';
 import databaseRouter from './routes/database.js';
 import generateRouter from './routes/generate.js';
+import refImagesRouter from './routes/refImages.js';
 
 // 导入服务
 import { aliOssService } from './services/aliOssService.js';
@@ -102,6 +103,7 @@ app.use('/api/images', imagesRouter);
 app.use('/api/config', configRouter);
 app.use('/api/database', databaseRouter);
 app.use('/api/generate', generateRouter);
+app.use('/api/ref-images', refImagesRouter);
 
 // 错误处理中间件
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -141,6 +143,7 @@ const startServer = async () => {
     console.log(`   - 配置管理: /api/config`);
     console.log(`   - 数据库: /api/database`);
     console.log(`   - 图片生成: /api/generate`);
+    console.log(`   - 参考图片: /api/ref-images`);
   });
 };
 

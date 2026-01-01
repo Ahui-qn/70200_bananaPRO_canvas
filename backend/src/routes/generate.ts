@@ -3,6 +3,7 @@ import { ApiResponse, CreateImageRequest, NanoBananaResultData } from '@shared/t
 import { nanoBananaService } from '../services/nanoBananaService.js';
 import { databaseService } from '../services/databaseService.js';
 import { aliOssService } from '../services/aliOssService.js';
+import { referenceImageService } from '../services/referenceImageService.js';
 
 const router = express.Router();
 
@@ -43,13 +44,28 @@ router.post('/', async (req, res) => {
       return res.status(400).json(response);
     }
 
+    // 处理参考图片：上传到 OSS 并获取 URL
+    let refImageUrls: string[] | undefined;
+    if (request.refImages && request.refImages.length > 0) {
+      try {
+        console.log(`处理 ${request.refImages.length} 张参考图片...`);
+        const uploadResults = await referenceImageService.uploadRefImages(request.refImages);
+        refImageUrls = uploadResults.map(r => r.ossUrl);
+        console.log(`参考图片处理完成，获取到 ${refImageUrls.length} 个 OSS URL`);
+      } catch (uploadError: any) {
+        console.warn('参考图片上传失败，使用原始 Base64:', uploadError.message);
+        // 如果上传失败，回退到使用原始 Base64
+        refImageUrls = request.refImages;
+      }
+    }
+
     // 创建生成任务
     const taskId = await nanoBananaService.createTask({
       model: request.model,
       prompt: request.prompt,
       aspectRatio: request.aspectRatio,
       imageSize: request.imageSize,
-      urls: request.refImages,
+      urls: refImageUrls,
       shutProgress: false
     }, apiConfig);
 
@@ -57,7 +73,8 @@ router.post('/', async (req, res) => {
       success: true,
       data: {
         taskId,
-        status: 'created'
+        status: 'created',
+        refImagesUploaded: refImageUrls ? refImageUrls.length : 0
       },
       message: '图片生成任务创建成功'
     };
@@ -145,21 +162,60 @@ router.post('/:taskId/save', async (req, res) => {
       console.log('OSS 未配置，使用原始 URL');
     }
 
-    // 创建图片记录
+    // 处理参考图片：如果是 Base64，先上传到 OSS
+    let processedRefImages: { ossUrl: string; id: string }[] | undefined;
+    if (refImages && Array.isArray(refImages) && refImages.length > 0) {
+      try {
+        // 检查是否是 Base64 格式（以 data: 开头或不包含 http）
+        const isBase64 = refImages.some((img: any) => {
+          if (typeof img === 'string') {
+            return img.startsWith('data:') || !img.startsWith('http');
+          }
+          return img.base64 || img.preview;
+        });
+
+        if (isBase64) {
+          // 提取 Base64 数据
+          const base64Images = refImages.map((img: any) => {
+            if (typeof img === 'string') return img;
+            return img.base64 || img.preview;
+          }).filter(Boolean);
+
+          if (base64Images.length > 0) {
+            console.log(`上传 ${base64Images.length} 张参考图片到 OSS...`);
+            const uploadResults = await referenceImageService.uploadRefImages(base64Images);
+            processedRefImages = uploadResults.map(r => ({ ossUrl: r.ossUrl, id: r.id }));
+            console.log(`参考图片上传完成，新上传 ${uploadResults.filter(r => r.isNew).length} 张`);
+          }
+        } else {
+          // 已经是 URL 格式，直接使用
+          processedRefImages = refImages.map((url: string, index: number) => ({
+            ossUrl: url,
+            id: `existing_${index}`
+          }));
+        }
+      } catch (refError: any) {
+        console.warn('处理参考图片失败:', refError.message);
+        // 参考图片处理失败不影响主图片保存
+      }
+    }
+
+    // 创建图片记录 - 只保存参考图片的 OSS URL，不保存 Base64
     const savedImage = {
       id: imageId,
       url: finalUrl,
-      originalUrl: ossUploaded ? imageUrl : undefined,  // 保存原始临时 URL
+      originalUrl: ossUploaded ? imageUrl : undefined,
       prompt: prompt || '',
       model: model || 'nano-banana-fast',
       aspectRatio: aspectRatio || 'auto',
       imageSize: imageSize || '1K',
-      refImages: refImages || undefined,
+      // 只保存 OSS URL 引用，不保存 Base64
+      refImages: processedRefImages ? processedRefImages.map(r => ({ url: r.ossUrl, id: r.id })) : undefined,
       createdAt: new Date(),
       favorite: false,
       ossKey,
       ossUploaded,
-      taskId  // 保存任务 ID 以便追踪
+      taskId
     };
 
     // 保存到数据库
@@ -170,7 +226,8 @@ router.post('/:taskId/save', async (req, res) => {
       data: {
         ...result,
         ossUploaded,
-        ossKey
+        ossKey,
+        refImagesProcessed: processedRefImages?.length || 0
       },
       message: ossUploaded ? '图片已上传到 OSS 并保存到数据库' : '图片已保存到数据库（OSS 未配置）'
     };
