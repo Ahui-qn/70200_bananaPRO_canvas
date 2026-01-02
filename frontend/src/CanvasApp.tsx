@@ -13,6 +13,7 @@ import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 import { OSSConfigModal } from './components/OSSConfigModal';
 import { ImageUpload } from './components/ImageUpload';
 import { ImageLibraryPage } from './components/ImageLibraryPage';
+import { useAuth } from './contexts/AuthContext';
 import {
   Zap,
   Settings,
@@ -34,6 +35,8 @@ import {
   X,
   Trash2,
   Loader2,
+  LogOut,
+  User,
 } from 'lucide-react';
 
 // 画布图片类型
@@ -247,6 +250,7 @@ const findNonOverlappingPosition = (existingImages: CanvasImage[], newWidth: num
 };
 
 function CanvasApp() {
+  const { user, logout } = useAuth();
   const [_status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
   const [apiConfig, setApiConfig] = useState<ApiConfig>(DEFAULT_API_CONFIG);
@@ -648,6 +652,21 @@ function CanvasApp() {
               <span>API</span>
               {apiConfig.apiKey && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
             </button>
+
+            {/* 用户信息和退出按钮（需求 5.1, 5.2） */}
+            <div className="flex items-center gap-3 ml-2 pl-3 border-l border-zinc-700/50">
+              <div className="flex items-center gap-2 text-sm text-zinc-300">
+                <User className="w-4 h-4 text-violet-400" />
+                <span>{user?.displayName || user?.username || '用户'}</span>
+              </div>
+              <button 
+                onClick={logout}
+                className="btn-glass flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-zinc-400 hover:text-red-400 transition-colors"
+                title="退出登录"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </header>

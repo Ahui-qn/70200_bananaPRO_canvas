@@ -17,10 +17,19 @@ import {
   DatabaseStatistics,
   ImageStatistics
 } from '../../../shared/types';
+import { getAuthToken } from '../contexts/AuthContext';
 
 const API_BASE_URL = '/api';
 
 class ApiService {
+  /**
+   * 获取认证头
+   */
+  private getAuthHeaders(): HeadersInit {
+    const token = getAuthToken();
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  }
+
   /**
    * 通用请求方法
    */
@@ -33,6 +42,7 @@ class ApiService {
     const defaultOptions: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
+        ...this.getAuthHeaders(),  // 添加认证头（需求 1.4, 2.4）
       },
     };
 
@@ -45,8 +55,19 @@ class ApiService {
       },
     });
 
+    // 处理 401 响应（需求 2.4）
+    if (response.status === 401) {
+      // 清除本地存储的令牌
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      // 刷新页面以重定向到登录页
+      window.location.reload();
+      throw new Error('登录已失效，请重新登录');
+    }
+
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
     return response.json();

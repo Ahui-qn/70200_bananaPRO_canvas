@@ -2,6 +2,23 @@
 -- 数据库：teset1
 -- 创建时间：2024-12-30
 
+-- 0. 用户表（用户登录系统）
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '用户唯一标识符（UUID格式）',
+  `username` VARCHAR(50) NOT NULL UNIQUE COMMENT '登录用户名',
+  `password_hash` VARCHAR(255) NOT NULL COMMENT 'bcrypt加密的密码',
+  `display_name` VARCHAR(100) NOT NULL COMMENT '显示名称',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `last_login_at` TIMESTAMP NULL COMMENT '最后登录时间',
+  `is_active` BOOLEAN DEFAULT TRUE COMMENT '账号是否启用',
+  
+  -- 索引
+  INDEX `idx_username` (`username`),
+  INDEX `idx_is_active` (`is_active`),
+  INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
+
 -- 1. 图片记录表
 CREATE TABLE IF NOT EXISTS `images` (
   `id` VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '图片唯一标识符',

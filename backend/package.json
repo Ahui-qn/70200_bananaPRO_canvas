@@ -7,23 +7,33 @@
     "dev:full": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "user:create": "tsx src/scripts/manage-users.ts create",
+    "user:list": "tsx src/scripts/manage-users.ts list",
+    "user:disable": "tsx src/scripts/manage-users.ts disable",
+    "user:enable": "tsx src/scripts/manage-users.ts enable"
   },
   "dependencies": {
     "ali-oss": "^6.23.0",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "mysql2": "^3.16.0"
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.16.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/ali-oss": "^6.16.13",
+    "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.17",
     "@types/crypto-js": "^4.2.2",
     "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.14.0",
+    "fast-check": "^4.5.3",
     "tsx": "^4.19.2",
     "typescript": "~5.8.2",
     "vitest": "^4.0.16"

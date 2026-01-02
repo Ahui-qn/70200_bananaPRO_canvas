@@ -117,6 +117,14 @@ export class DatabaseServiceImpl implements DatabaseService {
 
       console.log(`数据库连接成功，延迟: ${latency}ms`);
       
+      // 自动初始化数据库表结构（如果表不存在则创建）
+      try {
+        const initializer = createDatabaseInitializer(this.connection);
+        await initializer.initializeAllTables();
+      } catch (initError: any) {
+        console.warn('数据库表初始化警告:', initError.message);
+      }
+      
       // 记录连接日志
       await this.logOperation('CONNECT', 'database', null, 'SUCCESS', null, latency);
       
@@ -355,7 +363,7 @@ export class DatabaseServiceImpl implements DatabaseService {
           Boolean(image.favorite),
           image.ossKey || null,
           Boolean(image.ossUploaded),
-          'default' // user_id
+          image.userId || 'default' // 使用传入的 userId 或默认值
         ];
 
         await this.connection!.execute(sql, values);
@@ -403,6 +411,11 @@ export class DatabaseServiceImpl implements DatabaseService {
                 whereConditions.push('(prompt LIKE ? OR JSON_SEARCH(tags, "one", ?) IS NOT NULL)');
                 const searchTerm = `%${value}%`;
                 queryParams.push(searchTerm, `%${value}%`);
+                break;
+              case 'userId':
+                // 支持按用户 ID 筛选（需求 4.3）
+                whereConditions.push('user_id = ?');
+                queryParams.push(value);
                 break;
             }
           }

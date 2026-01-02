@@ -209,3 +209,55 @@ export interface SaveConfigRequest {
 export interface TestConnectionRequest {
   databaseConfig: DatabaseConfig;
 }
+
+// ============================================
+// 用户登录系统类型定义
+// ============================================
+
+// 完整用户信息（仅后端使用，包含密码哈希）
+export interface User {
+  id: string;                    // 用户唯一标识符（UUID格式）
+  username: string;              // 登录用户名
+  passwordHash: string;          // bcrypt 加密的密码
+  displayName: string;           // 显示名称
+  createdAt: Date;               // 创建时间
+  updatedAt: Date;               // 更新时间
+  lastLoginAt: Date | null;      // 最后登录时间
+  isActive: boolean;             // 账号是否启用
+}
+
+// 公开用户信息（前端使用，不包含密码）
+export interface UserInfo {
+  id: string;                    // 用户唯一标识符
+  username: string;              // 登录用户名
+  displayName: string;           // 显示名称
+  lastLoginAt: Date | null;      // 最后登录时间
+}
+
+// JWT 令牌载荷
+export interface TokenPayload {
+  userId: string;                // 用户 ID
+  username: string;              // 用户名
+  displayName: string;           // 显示名称
+  iat: number;                   // 签发时间（Unix 时间戳）
+  exp: number;                   // 过期时间（Unix 时间戳）
+}
+
+// 登录请求
+export interface LoginRequest {
+  username: string;              // 用户名
+  password: string;              // 密码
+}
+
+// 登录响应
+export interface LoginResponse {
+  token: string;                 // JWT 令牌
+  user: UserInfo;                // 用户信息
+}
+
+// 创建用户请求
+export interface CreateUserRequest {
+  username: string;              // 用户名
+  password: string;              // 密码
+  displayName: string;           // 显示名称
+}

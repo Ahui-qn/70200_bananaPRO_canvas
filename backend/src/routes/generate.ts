@@ -138,6 +138,9 @@ router.post('/:taskId/save', async (req, res) => {
       return res.status(400).json(response);
     }
 
+    // 从认证中间件获取当前用户 ID（需求 4.2）
+    const userId = req.user?.id || 'default';
+
     // 生成图片 ID
     const imageId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     
@@ -215,7 +218,8 @@ router.post('/:taskId/save', async (req, res) => {
       favorite: false,
       ossKey,
       ossUploaded,
-      taskId
+      taskId,
+      userId  // 关联当前用户 ID（需求 4.2）
     };
 
     // 保存到数据库

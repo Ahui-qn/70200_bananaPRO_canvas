@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import CanvasApp from './CanvasApp';
+import { AuthProvider } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import './index.css';
 
 const rootElement = document.getElementById('root');
@@ -11,6 +13,10 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <CanvasApp />
+    <AuthProvider>
+      <ProtectedRoute>
+        <CanvasApp />
+      </ProtectedRoute>
+    </AuthProvider>
   </React.StrictMode>
 );

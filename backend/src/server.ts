@@ -10,6 +10,10 @@ import configRouter from './routes/config.js';
 import databaseRouter from './routes/database.js';
 import generateRouter from './routes/generate.js';
 import refImagesRouter from './routes/refImages.js';
+import authRouter from './routes/auth.js';
+
+// 导入中间件
+import { authMiddleware } from './middleware/auth.js';
 
 // 导入服务
 import { aliOssService } from './services/aliOssService.js';
@@ -99,11 +103,14 @@ app.get('/api/health', (_req, res) => {
 });
 
 // API 路由
-app.use('/api/images', imagesRouter);
-app.use('/api/config', configRouter);
-app.use('/api/database', databaseRouter);
-app.use('/api/generate', generateRouter);
-app.use('/api/ref-images', refImagesRouter);
+app.use('/api/auth', authRouter);
+
+// 受保护的路由（需要登录）
+app.use('/api/images', authMiddleware, imagesRouter);
+app.use('/api/config', authMiddleware, configRouter);
+app.use('/api/database', authMiddleware, databaseRouter);
+app.use('/api/generate', authMiddleware, generateRouter);
+app.use('/api/ref-images', authMiddleware, refImagesRouter);
 
 // 错误处理中间件
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

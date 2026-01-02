@@ -4,8 +4,7 @@
  */
 
 import mysql from 'mysql2/promise';
-import { DatabaseConfig } from '../types';
-import { SQL_TEMPLATES, TABLE_NAMES, DEFAULT_VALUES } from '../config/constants';
+import { TABLE_NAMES, DEFAULT_VALUES } from '../config/constants';
 
 /**
  * 数据库版本信息
@@ -46,6 +45,9 @@ export class DatabaseInitializer {
     try {
       // 设置字符集
       await this.setCharacterSet();
+      
+      // 创建 users 表（用户登录系统）
+      await this.createUsersTable();
       
       // 创建 images 表
       await this.createImagesTable();
@@ -88,9 +90,57 @@ export class DatabaseInitializer {
   }
 
   /**
+   * 创建 users 表（用户登录系统）
+   */
+  private async createUsersTable(): Promise<void> {
+    // 检查表是否已存在
+    const [tables] = await this.connection.execute(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+      [TABLE_NAMES.USERS]
+    );
+    
+    if ((tables as any[]).length > 0) {
+      console.log('users 表已存在，跳过创建');
+      return;
+    }
+    
+    console.log('创建 users 表...');
+    
+    const sql = `
+      CREATE TABLE IF NOT EXISTS ${TABLE_NAMES.USERS} (
+        id VARCHAR(36) NOT NULL COMMENT '用户唯一标识符（UUID格式）',
+        username VARCHAR(50) NOT NULL COMMENT '登录用户名',
+        password_hash VARCHAR(255) NOT NULL COMMENT 'bcrypt加密的密码',
+        display_name VARCHAR(100) NOT NULL COMMENT '显示名称',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+        last_login_at TIMESTAMP NULL COMMENT '最后登录时间',
+        is_active BOOLEAN DEFAULT TRUE COMMENT '账号是否启用',
+        
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_username (username)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表'
+    `;
+    
+    await this.connection.execute(sql);
+    console.log('users 表创建成功');
+  }
+
+  /**
    * 创建 images 表
    */
   private async createImagesTable(): Promise<void> {
+    // 检查表是否已存在
+    const [tables] = await this.connection.execute(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+      [TABLE_NAMES.IMAGES]
+    );
+    
+    if ((tables as any[]).length > 0) {
+      console.log('images 表已存在，跳过创建');
+      return;
+    }
+    
     console.log('创建 images 表...');
     
     const sql = `
@@ -123,6 +173,17 @@ export class DatabaseInitializer {
    * 创建 user_configs 表
    */
   private async createUserConfigsTable(): Promise<void> {
+    // 检查表是否已存在
+    const [tables] = await this.connection.execute(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+      [TABLE_NAMES.USER_CONFIGS]
+    );
+    
+    if ((tables as any[]).length > 0) {
+      console.log('user_configs 表已存在，跳过创建');
+      return;
+    }
+    
     console.log('创建 user_configs 表...');
     
     const sql = `
@@ -146,6 +207,17 @@ export class DatabaseInitializer {
    * 创建 operation_logs 表
    */
   private async createOperationLogsTable(): Promise<void> {
+    // 检查表是否已存在
+    const [tables] = await this.connection.execute(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+      [TABLE_NAMES.OPERATION_LOGS]
+    );
+    
+    if ((tables as any[]).length > 0) {
+      console.log('operation_logs 表已存在，跳过创建');
+      return;
+    }
+    
     console.log('创建 operation_logs 表...');
     
     const sql = `
@@ -172,6 +244,17 @@ export class DatabaseInitializer {
    * 创建 reference_images 表（参考图片去重存储）
    */
   private async createReferenceImagesTable(): Promise<void> {
+    // 检查表是否已存在
+    const [tables] = await this.connection.execute(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+      ['reference_images']
+    );
+    
+    if ((tables as any[]).length > 0) {
+      console.log('reference_images 表已存在，跳过创建');
+      return;
+    }
+    
     console.log('创建 reference_images 表...');
     
     const sql = `
@@ -207,6 +290,10 @@ export class DatabaseInitializer {
     
     // 索引定义：[表名, 索引名, 列名]
     const indexDefinitions: [string, string, string][] = [
+      // users 表索引
+      [TABLE_NAMES.USERS, 'idx_users_is_active', 'is_active'],
+      [TABLE_NAMES.USERS, 'idx_users_created_at', 'created_at'],
+      
       // images 表索引
       [TABLE_NAMES.IMAGES, 'idx_images_created_at', 'created_at'],
       [TABLE_NAMES.IMAGES, 'idx_images_model', 'model'],
@@ -306,7 +393,7 @@ export class DatabaseInitializer {
   private async validateTableStructure(): Promise<void> {
     console.log('验证表结构完整性...');
     
-    const requiredTables = [TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS];
+    const requiredTables = [TABLE_NAMES.USERS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS];
     
     for (const tableName of requiredTables) {
       const checkResult = await this.checkTableStructure(tableName);
@@ -393,9 +480,9 @@ export class DatabaseInitializer {
           TABLE_COMMENT as comment
         FROM information_schema.TABLES 
         WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME IN (?, ?, ?)
+          AND TABLE_NAME IN (?, ?, ?, ?)
         ORDER BY TABLE_NAME
-      `, [TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
+      `, [TABLE_NAMES.USERS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
       
       for (const row of tableStats as any[]) {
         (stats.tables as any)[row.tableName] = {
@@ -417,10 +504,10 @@ export class DatabaseInitializer {
           GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) as columns
         FROM information_schema.STATISTICS 
         WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME IN (?, ?, ?)
+          AND TABLE_NAME IN (?, ?, ?, ?)
         GROUP BY TABLE_NAME, INDEX_NAME
         ORDER BY TABLE_NAME, INDEX_NAME
-      `, [TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
+      `, [TABLE_NAMES.USERS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
       
       for (const row of indexStats as any[]) {
         if (!(stats.indexes as any)[row.tableName]) {
