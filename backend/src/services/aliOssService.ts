@@ -149,7 +149,7 @@ class AliOssService {
     try {
       const ossKey = customKey || this.generateObjectKey();
       
-      const result = await this.client.put(ossKey, buffer, {
+      await this.client.put(ossKey, buffer, {
         headers: {
           'Content-Type': contentType,
           'x-oss-object-acl': 'public-read'
@@ -167,6 +167,45 @@ class AliOssService {
     } catch (error: any) {
       console.error('上传 Buffer 到 OSS 失败:', error);
       throw new Error(`上传 Buffer 到 OSS 失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 上传缩略图到 OSS
+   * 缩略图使用 thumb/ 前缀存储，与原图关联
+   * @param buffer 缩略图数据
+   * @param originalKey 原图的 OSS 键名
+   * @returns 上传结果
+   */
+  async uploadThumbnail(buffer: Buffer, originalKey: string): Promise<{ url: string; ossKey: string }> {
+    if (!this.client || !this.config) {
+      throw new Error('OSS 服务未初始化，请先调用 initialize()');
+    }
+
+    try {
+      // 生成缩略图键名：在原图键名前添加 thumb/ 前缀
+      // 例如：nano-banana/2024/01/02/xxx.jpg -> thumb/nano-banana/2024/01/02/xxx.jpg
+      const thumbKey = `thumb/${originalKey}`;
+      
+      await this.client.put(thumbKey, buffer, {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'x-oss-object-acl': 'public-read'
+        }
+      });
+
+      // 构建访问 URL
+      const url = `https://${this.config.bucket}.${this.config.region}.aliyuncs.com/${thumbKey}`;
+
+      console.log('缩略图上传成功:', url);
+
+      return {
+        url,
+        ossKey: thumbKey
+      };
+    } catch (error: any) {
+      console.error('上传缩略图到 OSS 失败:', error);
+      throw new Error(`上传缩略图到 OSS 失败: ${error.message}`);
     }
   }
 
@@ -232,6 +271,68 @@ class AliOssService {
   }
 
   /**
+   * 列出所有文件
+   */
+  async listAllFiles(): Promise<string[]> {
+    if (!this.client) {
+      throw new Error('OSS 服务未初始化');
+    }
+
+    try {
+      const allFiles: string[] = [];
+      let continuationToken: string | undefined;
+
+      do {
+        const result = await this.client.list({
+          'max-keys': 1000,
+          'continuation-token': continuationToken
+        });
+
+        if (result.objects) {
+          allFiles.push(...result.objects.map(obj => obj.name));
+        }
+
+        continuationToken = result.nextContinuationToken;
+      } while (continuationToken);
+
+      return allFiles;
+    } catch (error: any) {
+      console.error('列出OSS文件失败:', error);
+      // 重新抛出原始错误，保持错误代码
+      const newError = new Error(`列出OSS文件失败: ${error.message}`);
+      (newError as any).code = error.code;
+      (newError as any).status = error.status;
+      throw newError;
+    }
+  }
+
+  /**
+   * 批量删除多个文件
+   */
+  async deleteMultipleFiles(ossKeys: string[]): Promise<void> {
+    if (!this.client) {
+      throw new Error('OSS 服务未初始化');
+    }
+
+    if (ossKeys.length === 0) {
+      return;
+    }
+
+    try {
+      // OSS 批量删除 API 限制每次最多 1000 个对象
+      const batchSize = 1000;
+      
+      for (let i = 0; i < ossKeys.length; i += batchSize) {
+        const batch = ossKeys.slice(i, i + batchSize);
+        await this.client.deleteMulti(batch, { quiet: true });
+      }
+    } catch (error: any) {
+      console.error('批量删除OSS文件失败:', error);
+      throw new Error(`批量删除OSS文件失败: ${error.message}`);
+    }
+  }
+
+  /**
    * 获取 OSS 配置信息（隐藏敏感信息）
    */
   getConfigInfo(): { region: string; bucket: string; endpoint?: string } | null {
@@ -247,5 +348,6 @@ class AliOssService {
   }
 }
 
-// 导出单例实例
+// 导出单例实例和类
 export const aliOssService = new AliOssService();
+export { AliOssService };

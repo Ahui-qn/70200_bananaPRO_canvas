@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` VARCHAR(50) NOT NULL UNIQUE COMMENT '登录用户名',
   `password_hash` VARCHAR(255) NOT NULL COMMENT 'bcrypt加密的密码',
   `display_name` VARCHAR(100) NOT NULL COMMENT '显示名称',
+  `role` ENUM('user', 'admin') DEFAULT 'user' COMMENT '用户角色',
+  `current_project_id` VARCHAR(36) NULL COMMENT '当前项目ID',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `last_login_at` TIMESTAMP NULL COMMENT '最后登录时间',
@@ -16,8 +18,29 @@ CREATE TABLE IF NOT EXISTS `users` (
   -- 索引
   INDEX `idx_username` (`username`),
   INDEX `idx_is_active` (`is_active`),
-  INDEX `idx_created_at` (`created_at`)
+  INDEX `idx_created_at` (`created_at`),
+  INDEX `idx_role` (`role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
+
+-- 0.5 项目表（轻量级项目管理）
+CREATE TABLE IF NOT EXISTS `projects` (
+  `id` VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '项目唯一标识符（UUID格式）',
+  `name` VARCHAR(100) NOT NULL COMMENT '项目名称',
+  `description` TEXT COMMENT '项目描述',
+  `cover_image_url` TEXT COMMENT '封面图片URL',
+  `created_by` VARCHAR(36) NOT NULL COMMENT '创建者用户ID',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` BOOLEAN DEFAULT FALSE COMMENT '是否已删除（软删除）',
+  `deleted_at` TIMESTAMP NULL COMMENT '删除时间',
+  `deleted_by` VARCHAR(36) NULL COMMENT '删除者用户ID',
+  `canvas_state` JSON COMMENT '画布状态（视口位置、缩放比例）',
+  
+  -- 索引
+  INDEX `idx_created_by` (`created_by`),
+  INDEX `idx_is_deleted` (`is_deleted`),
+  INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目表';
 
 -- 1. 图片记录表
 CREATE TABLE IF NOT EXISTS `images` (
@@ -34,16 +57,31 @@ CREATE TABLE IF NOT EXISTS `images` (
   `favorite` BOOLEAN DEFAULT FALSE COMMENT '是否收藏',
   `oss_key` TEXT COMMENT 'OSS对象键名',
   `oss_uploaded` BOOLEAN DEFAULT FALSE COMMENT '是否已上传到OSS',
-  `user_id` VARCHAR(50) DEFAULT 'default' COMMENT '用户ID（预留多用户支持）',
+  `user_id` VARCHAR(50) DEFAULT 'default' COMMENT '用户ID',
+  `project_id` VARCHAR(36) NULL COMMENT '所属项目ID',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` BOOLEAN DEFAULT FALSE COMMENT '是否已删除（软删除）',
+  `deleted_at` TIMESTAMP NULL COMMENT '删除时间',
+  `deleted_by` VARCHAR(36) NULL COMMENT '删除者用户ID',
+  `canvas_x` INT DEFAULT NULL COMMENT '图片在画布上的 X 坐标',
+  `canvas_y` INT DEFAULT NULL COMMENT '图片在画布上的 Y 坐标',
+  `thumbnail_url` TEXT COMMENT '缩略图 URL',
+  `width` INT UNSIGNED COMMENT '图片实际宽度（像素）',
+  `height` INT UNSIGNED COMMENT '图片实际高度（像素）',
   
   -- 索引
   INDEX `idx_created_at` (`created_at`),
   INDEX `idx_model` (`model`),
   INDEX `idx_favorite` (`favorite`),
   INDEX `idx_user_id` (`user_id`),
-  INDEX `idx_oss_uploaded` (`oss_uploaded`)
+  INDEX `idx_project_id` (`project_id`),
+  INDEX `idx_oss_uploaded` (`oss_uploaded`),
+  INDEX `idx_is_deleted` (`is_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图片记录表';
+
+-- 为已存在的表添加 width 和 height 字段（迁移脚本）
+-- ALTER TABLE `images` ADD COLUMN IF NOT EXISTS `width` INT UNSIGNED COMMENT '图片实际宽度（像素）';
+-- ALTER TABLE `images` ADD COLUMN IF NOT EXISTS `height` INT UNSIGNED COMMENT '图片实际高度（像素）';
 
 -- 2. 用户配置表（可选，支持多用户）
 CREATE TABLE IF NOT EXISTS `user_configs` (

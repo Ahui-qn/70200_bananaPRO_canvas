@@ -6,6 +6,9 @@ import {
   DatabaseConfig,
   OSSConfig,
   UploadedImage,
+  CanvasImage as CanvasImageType,
+  Viewport,
+  CanvasState,
 } from '../../shared/types';
 import { apiService } from './services/api';
 import { ApiConfigModal } from './components/ApiConfigModal';
@@ -13,7 +16,14 @@ import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 import { OSSConfigModal } from './components/OSSConfigModal';
 import { ImageUpload } from './components/ImageUpload';
 import { ImageLibraryPage } from './components/ImageLibraryPage';
-import { useAuth } from './contexts/AuthContext';
+import { ImagePreviewModal } from './components/ImagePreviewModal';
+import { useAuth, getAuthToken } from './contexts/AuthContext';
+import { ProjectProvider, useProject } from './contexts/ProjectContext';
+import ProjectSwitcher from './components/ProjectSwitcher';
+import TrashBin from './components/TrashBin';
+import { useCanvasImages } from './hooks/useCanvasImages';
+import { CanvasImageLayer } from './components/CanvasImageLayer';
+import { imageLoadingManager } from './services/imageLoadingManager';
 import {
   Zap,
   Settings,
@@ -37,10 +47,11 @@ import {
   Loader2,
   LogOut,
   User,
+  Crosshair,
 } from 'lucide-react';
 
-// 画布图片类型
-interface CanvasImage {
+// 画布图片类型（本地使用，与共享类型兼容）
+interface LocalCanvasImage {
   id: string;
   url: string;
   prompt: string;
@@ -50,10 +61,17 @@ interface CanvasImage {
   height: number;
   isPlaceholder?: boolean;
   progress?: number;
-  refImages?: { url: string; id: string }[];  // 参考图片
+  refImages?: { url: string; id: string }[];  // 参考图片（简化格式）
   model?: string;
   aspectRatio?: string;
   imageSize?: string;
+  canvasX?: number;
+  canvasY?: number;
+  thumbnailUrl?: string;
+  loadingState?: 'placeholder' | 'thumbnail' | 'loading' | 'loaded';
+  isVisible?: boolean;
+  favorite?: boolean;
+  createdAt?: Date;
 }
 
 const DEFAULT_SETTINGS: GenerationSettings = {
@@ -202,55 +220,29 @@ const ModelSelect: React.FC<ModelSelectProps> = ({ value, onChange, disabled }) 
 };
 
 
-// 计算不重叠的位置
-const findNonOverlappingPosition = (existingImages: CanvasImage[], newWidth: number, newHeight: number): { x: number; y: number } => {
-  const padding = 20;
+// 使用 useCanvasImages Hook 中的 findNonOverlappingPosition 函数
+// 此处保留一个本地版本用于占位符计算（不需要持久化的场景）
+// 批量生成时，新占位符会按顺序排列成一排
+const findLocalNonOverlappingPosition = (existingImages: LocalCanvasImage[], newWidth: number, newHeight: number): { x: number; y: number } => {
+  const padding = 10; // 图片之间的间距（减小间距）
   const startX = 100;
   const startY = 100;
+  const maxCols = 6; // 每行最多6张图片
   
-  if (existingImages.length === 0) {
-    return { x: startX, y: startY };
-  }
+  // 计算当前图片数量，直接按顺序排列
+  const index = existingImages.length;
+  const col = index % maxCols;
+  const row = Math.floor(index / maxCols);
   
-  // 尝试在现有图片右侧或下方找位置
-  let bestX = startX;
-  let bestY = startY;
-  let found = false;
-  
-  // 按行排列
-  const rowHeight = 450;
-  const colWidth = 450;
-  const maxCols = 4;
-  
-  for (let row = 0; row < 10 && !found; row++) {
-    for (let col = 0; col < maxCols && !found; col++) {
-      const testX = startX + col * colWidth;
-      const testY = startY + row * rowHeight;
-      
-      // 检查是否与现有图片重叠
-      const overlaps = existingImages.some(img => {
-        const imgRight = img.x + (img.width || 400);
-        const imgBottom = img.y + (img.height || 400);
-        const testRight = testX + newWidth;
-        const testBottom = testY + newHeight;
-        
-        return !(testX >= imgRight + padding || testRight <= img.x - padding ||
-                 testY >= imgBottom + padding || testBottom <= img.y - padding);
-      });
-      
-      if (!overlaps) {
-        bestX = testX;
-        bestY = testY;
-        found = true;
-      }
-    }
-  }
-  
-  return { x: bestX, y: bestY };
+  return { 
+    x: startX + col * (newWidth + padding), 
+    y: startY + row * (newHeight + padding) 
+  };
 };
 
 function CanvasApp() {
   const { user, logout } = useAuth();
+  const { currentProject } = useProject();  // 获取当前项目（需求 4.1）
   const [_status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
   const [apiConfig, setApiConfig] = useState<ApiConfig>(DEFAULT_API_CONFIG);
@@ -262,6 +254,8 @@ function CanvasApp() {
   const [showDatabaseConfig, setShowDatabaseConfig] = useState(false);
   const [showOSSConfig, setShowOSSConfig] = useState(false);
   const [showImageLibrary, setShowImageLibrary] = useState(false);
+  const [showTrashBin, setShowTrashBin] = useState(false);
+  const [previewImage, setPreviewImage] = useState<CanvasImageType | null>(null);
 
   // 连接状态
   const [backendConnected, setBackendConnected] = useState(false);
@@ -269,11 +263,59 @@ function CanvasApp() {
   const [ossConnected, setOssConnected] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // 生成状态
-  const [canvasImages, setCanvasImages] = useState<CanvasImage[]>([]);
+  // 使用 useCanvasImages Hook 管理画布图片（需求 1.1, 1.4）
+  const {
+    images: persistedImages,
+    isLoading: isLoadingImages,
+    error: imagesError,
+    canvasState,
+    loadProjectImages,
+    updateImagePosition,
+    savePendingPositions,
+    getPendingUpdates,
+    addNewImage,
+    removeImage,
+    saveCanvasState,
+    clearImages,
+    getVisibleImages: getVisibleImagesFromHook,
+  } = useCanvasImages();
+
+  // 本地画布图片状态（包含占位符等临时图片）
+  const [localCanvasImages, setLocalCanvasImages] = useState<LocalCanvasImage[]>([]);
+  
+  // 合并持久化图片和本地图片
+  const canvasImages: LocalCanvasImage[] = [
+    ...persistedImages.map(img => ({
+      id: img.id,
+      url: img.url,
+      prompt: img.prompt,
+      x: img.canvasX ?? (img as any).x ?? 0,
+      y: img.canvasY ?? (img as any).y ?? 0,
+      width: img.width || 400,
+      height: img.height || 400,
+      canvasX: img.canvasX,
+      canvasY: img.canvasY,
+      model: img.model,
+      aspectRatio: img.aspectRatio,
+      imageSize: img.imageSize,
+      thumbnailUrl: img.thumbnailUrl,
+      loadingState: img.loadingState,
+      isVisible: img.isVisible,
+      favorite: img.favorite,
+      createdAt: img.createdAt,
+      // 转换参考图片格式
+      refImages: img.refImages?.map((ref, idx) => ({
+        url: (ref as any).url || (ref as any).preview || '',
+        id: (ref as any).id || `ref_${idx}`,
+      })),
+    })),
+    ...localCanvasImages.filter(img => img.isPlaceholder), // 只保留占位符
+  ];
+
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [showImageDetail, setShowImageDetail] = useState<CanvasImage | null>(null);
+  const [generateCount, setGenerateCount] = useState(1); // 批量生成数量（1-6）
+  const [showImageDetail, setShowImageDetail] = useState<LocalCanvasImage | null>(null);
 
   // 画布缩放和拖拽状态
   const [scale, setScale] = useState(1);
@@ -282,6 +324,25 @@ function CanvasApp() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragTarget, setDragTarget] = useState<'canvas' | string>('canvas');
   const canvasRef = useRef<HTMLDivElement>(null);
+  
+  // 是否显示「定位到最新」按钮（需求 7.3）
+  const [showLocateLatest, setShowLocateLatest] = useState(false);
+  
+  // 视口状态是否已恢复
+  const [viewportRestored, setViewportRestored] = useState(false);
+  
+  // 双击放大状态（需求 6.1, 6.2, 6.3, 6.4）
+  const [zoomState, setZoomState] = useState<{
+    isZoomedIn: boolean;
+    previousPosition: { x: number; y: number };
+    previousScale: number;
+    targetImageId: string | null;
+  }>({
+    isZoomedIn: false,
+    previousPosition: { x: 0, y: 0 },
+    previousScale: 1,
+    targetImageId: null,
+  });
   
   // 用 ref 追踪当前值，以便在事件处理器中获取最新值
   const scaleRef = useRef(scale);
@@ -294,6 +355,303 @@ function CanvasApp() {
   useEffect(() => {
     positionRef.current = position;
   }, [position]);
+
+  // 项目切换时加载对应图片（需求 1.1, 1.4）
+  useEffect(() => {
+    if (currentProject?.id && databaseConnected) {
+      loadProjectImages(currentProject.id);
+      // 清空本地占位符
+      setLocalCanvasImages([]);
+      // 重置视口恢复状态
+      setViewportRestored(false);
+      // 清理图片加载管理器
+      imageLoadingManager.clear();
+    }
+  }, [currentProject?.id, databaseConnected, loadProjectImages]);
+
+  // 恢复视口状态（需求 3.2）
+  useEffect(() => {
+    if (canvasState && !viewportRestored && !isLoadingImages) {
+      // 恢复保存的视口状态
+      setPosition({ x: -canvasState.viewportX, y: -canvasState.viewportY });
+      setScale(canvasState.scale);
+      setViewportRestored(true);
+      setShowLocateLatest(false);
+    } else if (!canvasState && !viewportRestored && !isLoadingImages && persistedImages.length > 0) {
+      // 没有保存的视口状态，定位到最新图片（需求 3.3）
+      locateToLatestImage();
+      setViewportRestored(true);
+    }
+  }, [canvasState, viewportRestored, isLoadingImages, persistedImages.length]);
+
+  // 页面卸载时保存视口状态和图片位置（需求 3.1, 2.1）
+  // 注意：使用上面定义的 positionRef 和 scaleRef 来获取最新值，避免依赖变化导致频繁保存
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (currentProject?.id && databaseConnected) {
+        const token = getAuthToken();
+        
+        // 1. 保存视口状态
+        const state: CanvasState = {
+          viewportX: -positionRef.current.x,
+          viewportY: -positionRef.current.y,
+          scale: scaleRef.current,
+        };
+        fetch(`/api/projects/${currentProject.id}/canvas-state`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(state),
+          keepalive: true,
+        }).catch(() => {});
+
+        // 2. 保存所有待保存的图片位置
+        const pendingUpdates = getPendingUpdates();
+        pendingUpdates.forEach((position, imageId) => {
+          fetch(`/api/images/${imageId}/canvas-position`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ canvasX: position.x, canvasY: position.y }),
+            keepalive: true,
+          }).catch(() => {});
+        });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // 组件卸载时也保存
+      handleBeforeUnload();
+    };
+  }, [currentProject?.id, databaseConnected, getPendingUpdates]); // 只依赖项目 ID 和数据库连接状态
+
+  // 定位到最新图片（需求 7.1, 7.2）
+  const locateToLatestImage = useCallback(() => {
+    if (persistedImages.length === 0) return;
+
+    // 找到最新的图片（按创建时间排序）
+    const sortedImages = [...persistedImages].sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+    const latestImage = sortedImages[0];
+    
+    if (latestImage) {
+      const imgX = latestImage.canvasX ?? (latestImage as any).x ?? 0;
+      const imgY = latestImage.canvasY ?? (latestImage as any).y ?? 0;
+      const imgWidth = latestImage.width || 400;
+      const imgHeight = latestImage.height || 400;
+
+      // 计算将图片居中显示的位置
+      const canvasElement = canvasRef.current;
+      if (canvasElement) {
+        const rect = canvasElement.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+
+        // 使用动画平滑滚动（需求 7.4）
+        const targetX = centerX - (imgX + imgWidth / 2) * scale;
+        const targetY = centerY - (imgY + imgHeight / 2) * scale;
+
+        // 平滑动画
+        const startX = position.x;
+        const startY = position.y;
+        const duration = 300;
+        const startTime = Date.now();
+
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          // 使用 easeOutCubic 缓动函数
+          const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+          const newX = startX + (targetX - startX) * easeProgress;
+          const newY = startY + (targetY - startY) * easeProgress;
+
+          setPosition({ x: newX, y: newY });
+
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            setShowLocateLatest(false);
+          }
+        };
+
+        requestAnimationFrame(animate);
+      }
+    }
+  }, [persistedImages, scale, position]);
+
+  /**
+   * 双击图片显示预览模态框
+   */
+  const handleImageDoubleClick = useCallback((image: CanvasImageType) => {
+    setPreviewImage(image);
+  }, []);
+
+  /**
+   * 收藏/取消收藏图片
+   */
+  const handleFavoriteImage = useCallback(async (imageId: string) => {
+    try {
+      const response = await fetch(`/api/images/${imageId}/favorite`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${getAuthToken()}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        // 刷新画布图片
+        if (currentProject?.id) {
+          loadProjectImages(currentProject.id);
+        }
+      }
+    } catch (error) {
+      console.error('收藏图片失败:', error);
+    }
+  }, [loadProjectImages]);
+
+  /**
+   * 双击放大图片到视口 80%（需求 6.1, 6.2, 6.3, 6.4）
+   * 如果已经放大，则恢复到之前的视口状态
+   */
+  const handleImageZoom = useCallback((image: LocalCanvasImage) => {
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) return;
+
+    const rect = canvasElement.getBoundingClientRect();
+    const viewportWidth = rect.width;
+    const viewportHeight = rect.height;
+
+    // 如果已经放大且是同一张图片，恢复到之前的状态
+    if (zoomState.isZoomedIn && zoomState.targetImageId === image.id) {
+      // 恢复到之前的视口状态（需求 6.3）
+      const startX = position.x;
+      const startY = position.y;
+      const startScale = scale;
+      const targetX = zoomState.previousPosition.x;
+      const targetY = zoomState.previousPosition.y;
+      const targetScale = zoomState.previousScale;
+      const duration = 300; // 300ms 平滑动画（需求 6.4）
+      const startTime = Date.now();
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // 使用 easeOutCubic 缓动函数
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+        const newX = startX + (targetX - startX) * easeProgress;
+        const newY = startY + (targetY - startY) * easeProgress;
+        const newScale = startScale + (targetScale - startScale) * easeProgress;
+
+        setPosition({ x: newX, y: newY });
+        setScale(newScale);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          // 动画完成，重置放大状态
+          setZoomState({
+            isZoomedIn: false,
+            previousPosition: { x: 0, y: 0 },
+            previousScale: 1,
+            targetImageId: null,
+          });
+        }
+      };
+
+      requestAnimationFrame(animate);
+      return;
+    }
+
+    // 保存当前视口状态
+    const previousPosition = { x: position.x, y: position.y };
+    const previousScale = scale;
+
+    // 计算放大后的缩放比例（图片占据视口 80%）
+    const imgWidth = image.width || 400;
+    const imgHeight = image.height || 400;
+    const targetViewportSize = 0.8; // 80% 的视口大小（需求 6.1）
+    
+    // 计算需要的缩放比例，使图片占据视口 80%
+    const scaleX = (viewportWidth * targetViewportSize) / imgWidth;
+    const scaleY = (viewportHeight * targetViewportSize) / imgHeight;
+    const targetScale = Math.min(scaleX, scaleY, 3); // 限制最大缩放为 3
+
+    // 计算图片中心在画布坐标系中的位置
+    const imgCenterX = image.x + imgWidth / 2;
+    const imgCenterY = image.y + imgHeight / 2;
+
+    // 计算将图片居中显示的位置
+    const targetX = viewportWidth / 2 - imgCenterX * targetScale;
+    const targetY = viewportHeight / 2 - imgCenterY * targetScale;
+
+    // 平滑动画（需求 6.4）
+    const startX = position.x;
+    const startY = position.y;
+    const startScale = scale;
+    const duration = 300; // 300ms
+    const startTime = Date.now();
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // 使用 easeOutCubic 缓动函数
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+      const newX = startX + (targetX - startX) * easeProgress;
+      const newY = startY + (targetY - startY) * easeProgress;
+      const newScale = startScale + (targetScale - startScale) * easeProgress;
+
+      setPosition({ x: newX, y: newY });
+      setScale(newScale);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // 动画完成，更新放大状态
+        setZoomState({
+          isZoomedIn: true,
+          previousPosition,
+          previousScale,
+          targetImageId: image.id,
+        });
+      }
+    };
+
+    requestAnimationFrame(animate);
+
+    // 立即加载原图以保证清晰度（需求 6.2）
+    imageLoadingManager.loadImmediately(image.id);
+  }, [position, scale, zoomState]);
+
+  /**
+   * ESC 键恢复放大状态（需求 6.3）
+   */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && zoomState.isZoomedIn && zoomState.targetImageId) {
+        // 找到放大的图片并恢复
+        const image = canvasImages.find(img => img.id === zoomState.targetImageId);
+        if (image) {
+          handleImageZoom(image);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [zoomState, canvasImages, handleImageZoom]);
 
 
   // 初始化应用
@@ -411,14 +769,20 @@ function CanvasApp() {
         setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
         setSelectedImageId(null);
       } else {
+        // 查找图片（可能在持久化图片或本地图片中）
         const img = canvasImages.find(i => i.id === target);
         if (img) {
-          setDragStart({ x: e.clientX - img.x, y: e.clientY - img.y });
+          // 记录鼠标在画布坐标系中的位置（考虑缩放）
+          // 鼠标屏幕坐标转换为画布坐标：(clientX - position.x) / scale
+          const mouseCanvasX = (e.clientX - position.x) / scale;
+          const mouseCanvasY = (e.clientY - position.y) / scale;
+          // 记录鼠标相对于图片左上角的偏移（在画布坐标系中）
+          setDragStart({ x: mouseCanvasX - img.x, y: mouseCanvasY - img.y });
           setSelectedImageId(target);
         }
       }
     }
-  }, [position, canvasImages]);
+  }, [position, canvasImages, scale]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isDragging) return;
@@ -426,139 +790,305 @@ function CanvasApp() {
     if (dragTarget === 'canvas') {
       setPosition({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
     } else {
-      setCanvasImages(prev => prev.map(img => 
-        img.id === dragTarget ? { ...img, x: e.clientX - dragStart.x, y: e.clientY - dragStart.y } : img
-      ));
+      // 将鼠标屏幕坐标转换为画布坐标（考虑缩放）
+      const mouseCanvasX = (e.clientX - position.x) / scale;
+      const mouseCanvasY = (e.clientY - position.y) / scale;
+      // 计算图片新位置（在画布坐标系中）
+      const newX = mouseCanvasX - dragStart.x;
+      const newY = mouseCanvasY - dragStart.y;
+      
+      // 检查是否是占位符（本地图片）
+      const isPlaceholder = localCanvasImages.some(img => img.id === dragTarget && img.isPlaceholder);
+      
+      if (isPlaceholder) {
+        // 更新本地占位符位置
+        setLocalCanvasImages(prev => prev.map(img => 
+          img.id === dragTarget ? { ...img, x: newX, y: newY } : img
+        ));
+      } else {
+        // 更新持久化图片位置
+        updateImagePosition(dragTarget, newX, newY);
+      }
     }
-  }, [isDragging, dragTarget, dragStart]);
+  }, [isDragging, dragTarget, dragStart, localCanvasImages, updateImagePosition, position, scale]);
 
   const handleMouseUp = useCallback(() => {
+    // 如果是拖拽画布，显示「定位到最新」按钮（需求 7.3）
+    if (isDragging && dragTarget === 'canvas') {
+      setShowLocateLatest(true);
+    }
+    // 图片位置不在这里保存，而是在页面卸载/组件销毁时统一保存
     setIsDragging(false);
-  }, []);
+  }, [isDragging, dragTarget]);
 
-  const handleDeleteImage = useCallback((id: string) => {
-    setCanvasImages(prev => prev.filter(img => img.id !== id));
+  const handleDeleteImage = useCallback(async (id: string) => {
+    // 检查是否是占位符
+    const isPlaceholder = localCanvasImages.some(img => img.id === id && img.isPlaceholder);
+    
+    if (isPlaceholder) {
+      // 删除本地占位符
+      setLocalCanvasImages(prev => prev.filter(img => img.id !== id));
+    } else {
+      // 调用后端 API 将图片移入回收站（软删除）
+      try {
+        const response = await apiService.deleteImage(id);
+        if (response.success) {
+          // 从本地状态中移除图片
+          removeImage(id);
+          console.log('图片已移入回收站');
+        } else {
+          console.error('删除图片失败:', response.error);
+          alert('删除图片失败: ' + (response.error || '未知错误'));
+        }
+      } catch (error: any) {
+        console.error('删除图片失败:', error);
+        alert('删除图片失败: ' + error.message);
+      }
+    }
+    
     if (selectedImageId === id) setSelectedImageId(null);
-  }, [selectedImageId]);
+  }, [selectedImageId, localCanvasImages, removeImage]);
 
-  // 生成图片
+  // 计算当前视口（用于虚拟渲染）
+  const getCurrentViewport = useCallback((): Viewport => {
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) {
+      return { x: 0, y: 0, width: 1920, height: 1080, scale: 1 };
+    }
+    const rect = canvasElement.getBoundingClientRect();
+    return {
+      x: -position.x / scale,
+      y: -position.y / scale,
+      width: rect.width,
+      height: rect.height,
+      scale: scale,
+    };
+  }, [position, scale]);
+
+  // 当前视口
+  const currentViewport = getCurrentViewport();
+
+  // 根据图片尺寸设置和宽高比计算实际像素尺寸
+  const calculateImageSize = (
+    imageSizeSetting: string,
+    aspectRatio: string
+  ): { width: number; height: number } => {
+    // 不同尺寸设置对应的基准像素（较长边）
+    const sizeMap: { [key: string]: number } = {
+      '1K': 1024,
+      '2K': 2048,
+      '4K': 4096,
+    };
+
+    const ratioMap: { [key: string]: { w: number; h: number } } = {
+      auto: { w: 1, h: 1 },
+      '1:1': { w: 1, h: 1 },
+      '4:3': { w: 4, h: 3 },
+      '3:4': { w: 3, h: 4 },
+      '16:9': { w: 16, h: 9 },
+      '9:16': { w: 9, h: 16 },
+      '3:2': { w: 3, h: 2 },
+      '2:3': { w: 2, h: 3 },
+      '21:9': { w: 21, h: 9 },
+    };
+
+    const basePixels = sizeMap[imageSizeSetting] || 1024;
+    const ratio = ratioMap[aspectRatio] || { w: 1, h: 1 };
+
+    // 以较长边为基准计算尺寸
+    if (ratio.w >= ratio.h) {
+      return {
+        width: basePixels,
+        height: Math.round((basePixels * ratio.h) / ratio.w),
+      };
+    } else {
+      return {
+        width: Math.round((basePixels * ratio.w) / ratio.h),
+        height: basePixels,
+      };
+    }
+  };
+
+  // 生成单张图片的核心逻辑
+  const generateSingleImage = async (
+    placeholderId: string, 
+    placeholderPos: { x: number; y: number },
+    imageSize: { width: number; height: number }
+  ): Promise<{ success: boolean; imageId?: string }> => {
+    const createResponse = await apiService.generateImage({
+      prompt: settings.prompt,
+      model: settings.model,
+      aspectRatio: settings.aspectRatio,
+      imageSize: settings.imageSize,
+      refImages: settings.refImages?.map(img => img.base64 || img.preview),
+    });
+
+    if (!createResponse.success) {
+      throw new Error(createResponse.error || '创建生成任务失败');
+    }
+
+    const taskId = createResponse.data?.taskId;
+    if (!taskId) throw new Error('未获取到任务ID');
+
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const statusResponse = await apiService.getGenerationStatus(taskId);
+
+      if (statusResponse.success && statusResponse.data) {
+        const { status: taskStatus, results, progress } = statusResponse.data;
+
+        // 更新占位符进度
+        setLocalCanvasImages(prev => prev.map(img => 
+          img.id === placeholderId ? { ...img, progress: progress || 0 } : img
+        ));
+
+        if (taskStatus === 'succeeded' && results?.length > 0) {
+          const imageUrl = results[0].url;
+          
+          // 移除占位符
+          setLocalCanvasImages(prev => prev.filter(img => img.id !== placeholderId));
+
+          if (databaseConnected) {
+            try {
+              const saveResponse = await apiService.saveGeneratedImage(taskId, {
+                imageUrl,
+                prompt: settings.prompt,
+                model: settings.model,
+                aspectRatio: settings.aspectRatio,
+                imageSize: settings.imageSize,
+                refImages: settings.refImages,
+                projectId: currentProject?.id,
+                canvasX: placeholderPos.x,
+                canvasY: placeholderPos.y,
+                width: imageSize.width,
+                height: imageSize.height,
+              });
+              
+              // 图片保存成功后立即刷新项目图片列表
+              // 先保存所有待保存的位置，避免刷新后丢失拖动的位置
+              if (currentProject?.id) {
+                await savePendingPositions();
+                await loadProjectImages(currentProject.id);
+              }
+              
+              return { success: true, imageId: saveResponse.data?.id };
+            } catch (saveError) {
+              console.warn('保存图片到数据库失败:', saveError);
+              // 添加到本地显示
+              const newImage: LocalCanvasImage = {
+                id: `local-${Date.now()}-${Math.random()}`,
+                url: imageUrl,
+                prompt: settings.prompt,
+                x: placeholderPos.x,
+                y: placeholderPos.y,
+                width: imageSize.width,
+                height: imageSize.height,
+                model: settings.model,
+                aspectRatio: settings.aspectRatio,
+                imageSize: settings.imageSize,
+              };
+              setLocalCanvasImages(prev => [...prev, newImage]);
+              return { success: true };
+            }
+          } else {
+            const newImage: LocalCanvasImage = {
+              id: `local-${Date.now()}-${Math.random()}`,
+              url: imageUrl,
+              prompt: settings.prompt,
+              x: placeholderPos.x,
+              y: placeholderPos.y,
+              width: imageSize.width,
+              height: imageSize.height,
+              model: settings.model,
+              aspectRatio: settings.aspectRatio,
+              imageSize: settings.imageSize,
+            };
+            setLocalCanvasImages(prev => [...prev, newImage]);
+            return { success: true };
+          }
+        } else if (taskStatus === 'failed') {
+          throw new Error('图片生成失败');
+        }
+      }
+      attempts++;
+    }
+    throw new Error('生成超时');
+  };
+
+  // 批量生成图片
   const handleGenerate = async () => {
     if (!settings.prompt.trim()) {
       alert('请输入提示词');
       return;
     }
 
-    const placeholderId = `placeholder-${Date.now()}`;
-    
     try {
       setIsGenerating(true);
       setStatus(AppStatus.SUBMITTING);
 
-      // 创建占位符
-      const placeholderPos = findNonOverlappingPosition(canvasImages, 400, 400);
-      const placeholder: CanvasImage = {
-        id: placeholderId,
-        url: '',
-        prompt: settings.prompt,
-        x: placeholderPos.x,
-        y: placeholderPos.y,
-        width: 400,
-        height: 400,
-        isPlaceholder: true,
-        progress: 0,
-      };
-      setCanvasImages(prev => [...prev, placeholder]);
+      // 根据图片尺寸设置和宽高比计算实际像素尺寸
+      const imageSize = calculateImageSize(settings.imageSize, settings.aspectRatio);
 
-      const createResponse = await apiService.generateImage({
-        prompt: settings.prompt,
-        model: settings.model,
-        aspectRatio: settings.aspectRatio,
-        imageSize: settings.imageSize,
-        refImages: settings.refImages?.map(img => img.base64 || img.preview),
-      });
-
-      if (!createResponse.success) {
-        throw new Error(createResponse.error || '创建生成任务失败');
+      // 为每张图片创建占位符和位置
+      const placeholders: { id: string; pos: { x: number; y: number }; size: { width: number; height: number } }[] = [];
+      let currentImages = [...canvasImages];
+      
+      for (let i = 0; i < generateCount; i++) {
+        const placeholderId = `placeholder-${Date.now()}-${i}`;
+        const placeholderPos = findLocalNonOverlappingPosition(currentImages, imageSize.width, imageSize.height);
+        
+        const placeholder: LocalCanvasImage = {
+          id: placeholderId,
+          url: '',
+          prompt: settings.prompt,
+          x: placeholderPos.x,
+          y: placeholderPos.y,
+          width: imageSize.width,
+          height: imageSize.height,
+          isPlaceholder: true,
+          progress: 0,
+        };
+        
+        placeholders.push({ id: placeholderId, pos: placeholderPos, size: imageSize });
+        currentImages = [...currentImages, placeholder];
       }
+      
+      // 添加所有占位符
+      setLocalCanvasImages(prev => [
+        ...prev,
+        ...placeholders.map(p => ({
+          id: p.id,
+          url: '',
+          prompt: settings.prompt,
+          x: p.pos.x,
+          y: p.pos.y,
+          width: p.size.width,
+          height: p.size.height,
+          isPlaceholder: true,
+          progress: 0,
+        }))
+      ]);
 
-      const taskId = createResponse.data?.taskId;
-      if (!taskId) throw new Error('未获取到任务ID');
+      // 并行生成所有图片（每张图片生成完成后会立即刷新显示）
+      const generatePromises = placeholders.map(({ id, pos, size }) => 
+        generateSingleImage(id, pos, size).catch(error => {
+          console.error(`生成图片失败 (${id}):`, error);
+          // 移除失败的占位符
+          setLocalCanvasImages(prev => prev.filter(img => img.id !== id));
+          return { success: false }; // 返回失败状态
+        })
+      );
 
-      let attempts = 0;
-      const maxAttempts = 60;
-
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        const statusResponse = await apiService.getGenerationStatus(taskId);
-
-        if (statusResponse.success && statusResponse.data) {
-          const { status: taskStatus, results, progress } = statusResponse.data;
-
-          // 更新占位符进度
-          setCanvasImages(prev => prev.map(img => 
-            img.id === placeholderId ? { ...img, progress: progress || 0 } : img
-          ));
-
-          if (taskStatus === 'succeeded' && results?.length > 0) {
-            const imageUrl = results[0].url;
-            
-            // 替换占位符为真实图片，保存参考图片信息
-            setCanvasImages(prev => prev.map(img => 
-              img.id === placeholderId ? { 
-                ...img, 
-                url: imageUrl, 
-                isPlaceholder: false, 
-                progress: undefined,
-                model: settings.model,
-                aspectRatio: settings.aspectRatio,
-                imageSize: settings.imageSize,
-                // 保存参考图片的预览 URL（用于展示）
-                refImages: settings.refImages?.map((refImg, index) => ({
-                  url: refImg.preview || refImg.base64 || '',
-                  id: `local_ref_${index}`
-                }))
-              } : img
-            ));
-            setSelectedImageId(placeholderId);
-            setStatus(AppStatus.SUCCESS);
-
-            if (databaseConnected) {
-              try {
-                const saveResponse = await apiService.saveGeneratedImage(taskId, {
-                  imageUrl,
-                  prompt: settings.prompt,
-                  model: settings.model,
-                  aspectRatio: settings.aspectRatio,
-                  imageSize: settings.imageSize,
-                  refImages: settings.refImages,
-                });
-                
-                // 如果保存成功且返回了处理后的参考图片 URL，更新画布图片
-                if (saveResponse.success && saveResponse.data?.refImages) {
-                  setCanvasImages(prev => prev.map(img => 
-                    img.id === placeholderId ? { 
-                      ...img, 
-                      refImages: saveResponse.data.refImages 
-                    } : img
-                  ));
-                }
-              } catch (saveError) {
-                console.warn('保存图片到数据库失败:', saveError);
-              }
-            }
-            return;
-          } else if (taskStatus === 'failed') {
-            throw new Error('图片生成失败');
-          }
-        }
-        attempts++;
-      }
-      throw new Error('生成超时，请重试');
+      await Promise.all(generatePromises);
+      
+      setStatus(AppStatus.SUCCESS);
+      
     } catch (error: any) {
-      console.error('图片生成失败:', error);
+      console.error('批量生成图片失败:', error);
       setStatus(AppStatus.ERROR);
-      // 移除占位符
-      setCanvasImages(prev => prev.filter(img => img.id !== placeholderId));
       alert('图片生成失败: ' + error.message);
     } finally {
       setIsGenerating(false);
@@ -573,7 +1103,14 @@ function CanvasApp() {
   };
 
   const statusIndicator = getStatusIndicator();
-  const gridSize = 24 * scale;
+  
+  // 网格点配置
+  const baseGridSize =50; // 基础网格间距（可调整此值改变网格密度）
+  const gridSize = baseGridSize * scale;
+  
+  // 根据缩放比例计算网格透明度（缩小时渐渐变透明）
+  // scale < 0.3 时完全透明，scale > 0.6 时完全显示，中间渐变
+  const gridOpacity = Math.min(1, Math.max(0, (scale - 0.3) / 0.3)) * 0.4;
 
   // 显示图片库页面
   if (showImageLibrary) {
@@ -581,8 +1118,8 @@ function CanvasApp() {
       <ImageLibraryPage
         onBack={() => setShowImageLibrary(false)}
         onSelectImage={(url) => {
-          const pos = findNonOverlappingPosition(canvasImages, 400, 400);
-          const newImage: CanvasImage = {
+          const pos = findLocalNonOverlappingPosition(canvasImages, 400, 400);
+          const newImage: LocalCanvasImage = {
             id: `img-${Date.now()}`,
             url,
             prompt: '从图片库导入',
@@ -591,7 +1128,8 @@ function CanvasApp() {
             width: 400,
             height: 400,
           };
-          setCanvasImages(prev => [...prev, newImage]);
+          // 添加到本地图片（非持久化）
+          setLocalCanvasImages(prev => [...prev, newImage]);
           setShowImageLibrary(false);
         }}
       />
@@ -627,14 +1165,14 @@ function CanvasApp() {
                 <span className="text-xs text-zinc-500">{statusIndicator.text}</span>
               </div>
             </div>
+            
+            {/* 项目切换器（需求 2.1） */}
+            <div className="ml-4 pl-4 border-l border-zinc-700/50">
+              <ProjectSwitcher />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowImageLibrary(true)} className="btn-glass flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-zinc-300 hover:text-zinc-100">
-              <FolderOpen className="w-4 h-4" />
-              <span>图片库</span>
-            </button>
-
             <button onClick={() => setShowDatabaseConfig(true)} className={`btn-glass flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all ${databaseConnected ? 'text-emerald-400 border-emerald-500/30' : 'text-zinc-300 hover:text-zinc-100'}`}>
               <Database className="w-4 h-4" />
               <span>数据库</span>
@@ -723,6 +1261,23 @@ function CanvasApp() {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2.5">生成数量</label>
+              <div className="flex gap-2">
+                {[1, 2, 3, 4, 5, 6].map((count) => (
+                  <button 
+                    key={count} 
+                    onClick={() => setGenerateCount(count)} 
+                    className={`tag-btn flex-1 px-2 py-2 rounded-lg text-sm font-medium ${generateCount === count ? 'active' : ''}`}
+                    disabled={isGenerating}
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-500 mt-1.5">同时生成多张图片，最多6张</p>
+            </div>
+
+            <div>
               <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-2.5">
                 <ImageIcon className="w-4 h-4 text-violet-400" />
                 参考图片
@@ -739,7 +1294,7 @@ function CanvasApp() {
               ) : (
                 <>
                   <Wand2 className="w-5 h-5" />
-                  <span>生成图片</span>
+                  <span>生成 {generateCount} 张图片</span>
                 </>
               )}
             </button>
@@ -753,20 +1308,73 @@ function CanvasApp() {
 
         {/* 右侧画布区域 */}
         <main ref={canvasRef} className="flex-1 relative canvas-container" onMouseDown={(e) => handleMouseDown(e, 'canvas')} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-          {/* 点矩阵背景 */}
-          <div className="absolute inset-0 opacity-40 pointer-events-none" style={{
-            backgroundImage: `radial-gradient(circle, rgba(180, 180, 233, 0.62) 1px, transparent 1px)`,
+          {/* 项目图片加载进度指示器（需求 1.1, 13.1） */}
+          {isLoadingImages && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+              <div className="glass-card rounded-xl px-4 py-3 flex items-center gap-3">
+                <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
+                <span className="text-sm text-zinc-300">正在加载项目图片...</span>
+              </div>
+            </div>
+          )}
+          
+          {/* 图片加载错误提示 */}
+          {imagesError && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+              <div className="glass-card rounded-xl px-4 py-3 flex items-center gap-3 border-red-500/30">
+                <X className="w-5 h-5 text-red-400" />
+                <span className="text-sm text-red-300">{imagesError}</span>
+                <button
+                  onClick={() => {
+                    if (currentProject?.id) {
+                      loadProjectImages(currentProject.id);
+                    }
+                  }}
+                  className="ml-2 px-3 py-1 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg transition-colors"
+                >
+                  重试
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* 点矩阵背景（缩小时渐渐变透明） */}
+          <div className="absolute inset-0 pointer-events-none transition-opacity duration-150" style={{
+            backgroundImage: `radial-gradient(circle, rgba(180, 180, 233, 0.62) 2px, transparent 1px)`,
             backgroundSize: `${gridSize}px ${gridSize}px`,
             backgroundPosition: `${position.x % gridSize}px ${position.y % gridSize}px`,
+            opacity: gridOpacity,
           }} />
 
           {/* 画布内容 */}
-          <div className="canvas-content absolute inset-0" style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
+          <div className={`canvas-content absolute inset-0 ${!isDragging ? 'with-transition' : ''}`} style={{ 
+            transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`, 
+            transformOrigin: '0 0',
+            willChange: isDragging ? 'transform' : 'auto',
+          }}>
             {canvasImages.length > 0 ? (
-              canvasImages.map((img) => (
-                <div key={img.id} className={`absolute cursor-move group ${selectedImageId === img.id ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-transparent' : ''}`} style={{ left: img.x, top: img.y }} onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, img.id); }} onDoubleClick={(e) => { e.stopPropagation(); if (!img.isPlaceholder) setShowImageDetail(img); }}>
-                  {img.isPlaceholder ? (
-                    // 占位符
+              <>
+                {/* 使用 CanvasImageLayer 渲染持久化图片（虚拟渲染 + 渐进式加载）*/}
+                <CanvasImageLayer
+                  images={persistedImages}
+                  viewport={currentViewport}
+                  selectedImageId={selectedImageId}
+                  onImageMouseDown={(e, imageId) => {
+                    e.stopPropagation();
+                    handleMouseDown(e, imageId);
+                  }}
+                  onImageDoubleClick={handleImageDoubleClick}
+                  onDeleteImage={(imageId) => handleDeleteImage(imageId)}
+                />
+                
+                {/* 渲染本地占位符（正在生成中的图片）*/}
+                {localCanvasImages.filter(img => img.isPlaceholder).map((img) => (
+                  <div 
+                    key={img.id} 
+                    className={`absolute cursor-move group ${selectedImageId === img.id ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-transparent' : ''}`} 
+                    style={{ left: img.x, top: img.y }} 
+                    onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, img.id); }}
+                  >
                     <div className="w-[400px] h-[400px] glass-card rounded-xl flex flex-col items-center justify-center gap-4">
                       <Loader2 className="w-12 h-12 text-violet-400 animate-spin" />
                       <div className="text-center">
@@ -778,44 +1386,78 @@ function CanvasApp() {
                       </div>
                       <p className="text-xs text-zinc-500 max-w-[300px] truncate px-4">{img.prompt}</p>
                     </div>
-                  ) : (
-                    // 真实图片
-                    <>
-                      <img src={img.url} alt={img.prompt} className="max-w-[400px] max-h-[400px] rounded-xl shadow-2xl shadow-black/50" draggable={false} />
-                      <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="btn-glass p-2 rounded-lg" onClick={(e) => { e.stopPropagation(); }}>
-                          <Heart className="w-3.5 h-3.5 text-zinc-300" />
-                        </button>
-                        <button className="btn-glass p-2 rounded-lg" onClick={(e) => { e.stopPropagation(); const link = document.createElement('a'); link.href = img.url; link.download = `nano-banana-${img.id}.png`; link.click(); }}>
-                          <Download className="w-3.5 h-3.5 text-zinc-300" />
-                        </button>
-                        <button className="btn-glass p-2 rounded-lg" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(img.url); }}>
-                          <Share2 className="w-3.5 h-3.5 text-zinc-300" />
-                        </button>
-                        <button className="btn-glass p-2 rounded-lg hover:bg-red-500/20" onClick={(e) => { e.stopPropagation(); handleDeleteImage(img.id); }}>
-                          <X className="w-3.5 h-3.5 text-zinc-300" />
-                        </button>
-                      </div>
-                      <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div className="glass-subtle px-2 py-1 rounded-lg">
-                          <p className="text-xs text-zinc-300 truncate">{img.prompt}</p>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))
+                  </div>
+                ))}
+              </>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-                <div className="text-center">
-                  <div className="w-24 h-24 glass-card rounded-3xl flex items-center justify-center mb-6 mx-auto">
-                    <ImageIcon className="w-12 h-12 text-zinc-600" />
+                <div className="text-center max-w-md">
+                  {/* 空状态图标 */}
+                  <div className="w-28 h-28 glass-card rounded-3xl flex items-center justify-center mb-6 mx-auto relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 to-indigo-500/10" />
+                    <ImageIcon className="w-14 h-14 text-zinc-500" />
                   </div>
-                  <h2 className="text-2xl font-semibold text-zinc-300 mb-2">开始创作</h2>
-                  <p className="text-zinc-500 mb-6 max-w-xs">在左侧输入提示词，点击生成按钮开始创作</p>
-                  {!apiConfig.apiKey && (
-                    <button onClick={() => setShowApiConfig(true)} className="btn-primary px-6 py-3 rounded-xl font-medium pointer-events-auto">配置 API Key</button>
-                  )}
+                  
+                  {/* 标题和描述 */}
+                  <h2 className="text-2xl font-semibold text-zinc-200 mb-3">
+                    {currentProject?.name ? `「${currentProject.name}」` : '画布'}还没有图片
+                  </h2>
+                  <p className="text-zinc-400 mb-8 leading-relaxed">
+                    在左侧输入提示词，点击生成按钮开始创作。<br />
+                    您也可以从图片库导入已有的图片。
+                  </p>
+                  
+                  {/* 快捷操作按钮 */}
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center pointer-events-auto">
+                    {!apiConfig.apiKey ? (
+                      <button 
+                        onClick={() => setShowApiConfig(true)} 
+                        className="btn-primary px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2"
+                      >
+                        <Settings className="w-4 h-4" />
+                        配置 API Key
+                      </button>
+                    ) : (
+                      <>
+                        <button 
+                          onClick={() => {
+                            // 聚焦到提示词输入框
+                            const textarea = document.querySelector('textarea');
+                            if (textarea) {
+                              textarea.focus();
+                            }
+                          }}
+                          className="btn-primary px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2"
+                        >
+                          <Wand2 className="w-4 h-4" />
+                          开始创作
+                        </button>
+                        <button 
+                          onClick={() => setShowImageLibrary(true)}
+                          className="btn-glass px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 text-zinc-300"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                          从图片库导入
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* 提示信息 */}
+                  <div className="mt-8 flex items-center justify-center gap-6 text-xs text-zinc-500">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                      <span>支持多种 AI 模型</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                      <span>支持参考图片</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span>自动保存到云端</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -830,13 +1472,19 @@ function CanvasApp() {
             <div className="w-px h-5 bg-zinc-700" />
             <button onClick={handleResetView} className="zoom-btn" title="重置视图"><RotateCcw className="w-4 h-4" /></button>
             <span className="text-xs text-zinc-500 min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
+            <div className="w-px h-5 bg-zinc-700" />
+            <button onClick={() => setShowImageLibrary(true)} className="zoom-btn" title="图片库"><FolderOpen className="w-4 h-4" /></button>
+            <button onClick={() => setShowTrashBin(true)} className="zoom-btn" title="回收站"><Trash2 className="w-4 h-4" /></button>
           </div>
 
-          {/* 清空画布按钮 */}
-          {canvasImages.filter(img => !img.isPlaceholder).length > 0 && (
-            <button onClick={() => setCanvasImages(prev => prev.filter(img => img.isPlaceholder))} className="absolute bottom-6 right-6 btn-glass flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-zinc-400 hover:text-red-400">
-              <Trash2 className="w-4 h-4" />
-              <span>清空画布</span>
+          {/* 定位到最新按钮（需求 7.1, 7.3） */}
+          {showLocateLatest && persistedImages.length > 0 && (
+            <button 
+              onClick={locateToLatestImage}
+              className="absolute bottom-20 right-6 btn-glass flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-violet-400 hover:text-violet-300 hover:bg-violet-500/10 border-violet-500/30 animate-fade-in shadow-lg shadow-violet-500/10"
+            >
+              <Crosshair className="w-4 h-4" />
+              <span>定位到最新</span>
             </button>
           )}
         </main>
@@ -941,8 +1589,37 @@ function CanvasApp() {
       <ApiConfigModal isOpen={showApiConfig} onClose={() => setShowApiConfig(false)} onConfigSaved={(config) => { setApiConfig(config); setShowApiConfig(false); }} />
       <DatabaseConfigModal isOpen={showDatabaseConfig} onClose={() => setShowDatabaseConfig(false)} onConfigSaved={(config) => { setDatabaseConfig(config); setDatabaseConnected(config.enabled); setShowDatabaseConfig(false); }} />
       <OSSConfigModal isOpen={showOSSConfig} onClose={() => setShowOSSConfig(false)} onConfigSaved={(config) => { setOssConfig(config); setOssConnected(config.enabled); setShowOSSConfig(false); }} />
+      
+      {/* 回收站弹窗（需求 8.1） */}
+      <TrashBin isOpen={showTrashBin} onClose={() => setShowTrashBin(false)} />
+      
+      {/* 图片预览模态框 */}
+      <ImagePreviewModal
+        image={previewImage}
+        isOpen={!!previewImage}
+        onClose={() => setPreviewImage(null)}
+        onFavorite={handleFavoriteImage}
+        onDownload={(image) => {
+          const link = document.createElement('a');
+          link.href = image.url;
+          link.download = `nano-banana-${image.id}.png`;
+          link.click();
+        }}
+        onShare={(image) => {
+          navigator.clipboard.writeText(image.url);
+        }}
+      />
     </div>
   );
 }
 
-export default CanvasApp;
+// 包装组件，添加 ProjectProvider
+function CanvasAppWithProviders() {
+  return (
+    <ProjectProvider>
+      <CanvasApp />
+    </ProjectProvider>
+  );
+}
+
+export default CanvasAppWithProviders;

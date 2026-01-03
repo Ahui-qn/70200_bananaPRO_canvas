@@ -61,6 +61,7 @@ router.post('/login', async (req, res) => {
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      role: user.role,
       lastLoginAt: new Date()
     };
 
@@ -140,6 +141,7 @@ router.get('/verify', async (req, res) => {
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      role: user.role,
       lastLoginAt: user.lastLoginAt
     };
 

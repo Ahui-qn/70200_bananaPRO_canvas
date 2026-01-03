@@ -166,14 +166,5 @@ npm run preview  # 预览生产构建
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-## 🙏 致谢
-
-- [Nano Banana AI](https://grsai.dakka.com.cn/) - 提供强大的 AI 绘画 API
-- [React](https://reactjs.org/) - 前端框架
-- [Vite](https://vitejs.dev/) - 构建工具
-- [Tailwind CSS](https://tailwindcss.com/) - 样式框架
-- [Lucide](https://lucide.dev/) - 图标库
-
-
 
 ⭐ 如果这个项目对您有帮助，请给它一个星标！

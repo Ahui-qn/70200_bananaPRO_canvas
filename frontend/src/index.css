@@ -73,7 +73,14 @@ body {
 
 .canvas-content {
   transform-origin: center center;
-  transition: transform 0.1s ease-out;
+  /* 使用 GPU 加速 */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* 只在非拖拽状态下添加过渡动画（用于缩放按钮等） */
+.canvas-content.with-transition {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* 滚动条样式 */
@@ -311,4 +318,49 @@ body {
 .page-exit-active {
   opacity: 0;
   transform: translateX(-20px);
+}
+
+
+/* 骨架屏加载动画（需求 13.1） */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s infinite;
+}
+
+/* 图片加载淡入动画 */
+@keyframes image-fade-in {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+.animate-image-fade-in {
+  animation: image-fade-in 0.5s ease-out forwards;
+}
+
+/* 加载进度条动画 */
+@keyframes progress-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-progress-pulse {
+  animation: progress-pulse 1.5s ease-in-out infinite;
 }

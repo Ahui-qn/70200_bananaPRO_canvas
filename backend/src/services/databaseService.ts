@@ -289,6 +289,41 @@ export class DatabaseServiceImpl implements DatabaseService {
   }
 
   /**
+   * 执行通用 SQL 查询
+   * 提供给其他服务使用的通用查询方法
+   * @param sql SQL 语句
+   * @param params 查询参数
+   * @returns 查询结果
+   */
+  async executeQuery(sql: string, params: any[] = []): Promise<any[]> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        const [rows] = await this.connection!.execute(sql, params);
+        
+        const duration = Date.now() - startTime;
+        // 从 SQL 中提取操作类型和表名用于日志
+        const operation = sql.trim().split(/\s+/)[0].toUpperCase();
+        const tableMatch = sql.match(/(?:FROM|INTO|UPDATE)\s+(\w+)/i);
+        const tableName = tableMatch ? tableMatch[1] : 'unknown';
+        
+        await this.logOperation(operation, tableName, null, 'SUCCESS', null, duration);
+        
+        return rows as any[];
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        const operation = sql.trim().split(/\s+/)[0].toUpperCase();
+        const tableMatch = sql.match(/(?:FROM|INTO|UPDATE)\s+(\w+)/i);
+        const tableName = tableMatch ? tableMatch[1] : 'unknown';
+        
+        await this.logOperation(operation, tableName, null, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '执行 SQL 查询');
+  }
+
+  /**
    * 带重试机制的数据库操作执行器
    */
   private async executeWithRetry<T>(
@@ -344,8 +379,9 @@ export class DatabaseServiceImpl implements DatabaseService {
         const sql = `
           INSERT INTO images (
             id, url, original_url, prompt, model, aspect_ratio, image_size,
-            ref_images, created_at, updated_at, tags, favorite, oss_key, oss_uploaded, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ref_images, created_at, updated_at, tags, favorite, oss_key, oss_uploaded, user_id, project_id,
+            canvas_x, canvas_y, thumbnail_url, width, height
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         
         const values = [
@@ -363,7 +399,13 @@ export class DatabaseServiceImpl implements DatabaseService {
           Boolean(image.favorite),
           image.ossKey || null,
           Boolean(image.ossUploaded),
-          image.userId || 'default' // 使用传入的 userId 或默认值
+          image.userId || 'default', // 使用传入的 userId 或默认值
+          image.projectId || null,   // 使用传入的 projectId（需求 4.1, 4.2）
+          image.canvasX !== undefined ? image.canvasX : null,  // 画布 X 坐标
+          image.canvasY !== undefined ? image.canvasY : null,  // 画布 Y 坐标
+          image.thumbnailUrl || null,  // 缩略图 URL
+          image.width !== undefined ? image.width : null,      // 图片实际宽度
+          image.height !== undefined ? image.height : null     // 图片实际高度
         ];
 
         await this.connection!.execute(sql, values);
@@ -384,14 +426,16 @@ export class DatabaseServiceImpl implements DatabaseService {
 
   /**
    * 分页获取图片列表
+   * 默认排除已删除的图片（需求 4.3, 5.2）
    */
   async getImages(pagination: PaginationOptions): Promise<PaginatedResult<SavedImage>> {
     return this.executeWithRetry(async () => {
       const startTime = Date.now();
       
       try {
-        // 构建查询条件
-        const whereConditions: string[] = [];
+        // 构建查询条件 - 默认排除已删除的图片
+        // 使用表别名 i. 前缀避免 JOIN 时的歧义
+        const whereConditions: string[] = ['(i.is_deleted = FALSE OR i.is_deleted IS NULL)'];
         const queryParams: any[] = [];
         
         if (pagination.filters) {
@@ -400,28 +444,34 @@ export class DatabaseServiceImpl implements DatabaseService {
             
             switch (key) {
               case 'model':
-                whereConditions.push('model = ?');
+                whereConditions.push('i.model = ?');
                 queryParams.push(value);
                 break;
               case 'favorite':
-                whereConditions.push('favorite = ?');
+                whereConditions.push('i.favorite = ?');
                 queryParams.push(Boolean(value));
                 break;
               case 'search':
-                whereConditions.push('(prompt LIKE ? OR JSON_SEARCH(tags, "one", ?) IS NOT NULL)');
+                whereConditions.push('(i.prompt LIKE ? OR JSON_SEARCH(i.tags, "one", ?) IS NOT NULL)');
                 const searchTerm = `%${value}%`;
                 queryParams.push(searchTerm, `%${value}%`);
                 break;
               case 'userId':
                 // 支持按用户 ID 筛选（需求 4.3）
-                whereConditions.push('user_id = ?');
+                whereConditions.push('i.user_id = ?');
+                queryParams.push(value);
+                break;
+              case 'projectId':
+                // 支持按项目 ID 筛选
+                // 只筛选指定项目的图片
+                whereConditions.push('i.project_id = ?');
                 queryParams.push(value);
                 break;
             }
           }
         }
         
-        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
         
         // 构建排序
         const allowedSortFields = ['id', 'created_at', 'updated_at', 'model', 'favorite'];
@@ -435,16 +485,19 @@ export class DatabaseServiceImpl implements DatabaseService {
         const offset = (page - 1) * pageSize;
         
         // 查询总数
-        const countSql = `SELECT COUNT(*) as total FROM images ${whereClause}`;
+        const countSql = `SELECT COUNT(*) as total FROM images i ${whereClause}`;
         const [countRows] = await this.connection!.execute(countSql, queryParams);
         const total = (countRows as any[])[0].total;
         
         // 查询数据 - 直接将数字嵌入 SQL（因为 MySQL prepared statement 对 LIMIT/OFFSET 有限制）
         // 注意：不查询 ref_images 字段以避免排序内存问题
+        // LEFT JOIN 用户表获取创建者名称
         const dataSql = `
-          SELECT id, url, prompt, model, aspect_ratio, image_size, tags, favorite, oss_uploaded, oss_key, created_at, updated_at FROM images 
+          SELECT i.id, i.url, i.prompt, i.model, i.aspect_ratio, i.image_size, i.tags, i.favorite, i.oss_uploaded, i.oss_key, i.created_at, i.updated_at, i.user_id, i.project_id, i.canvas_x, i.canvas_y, i.thumbnail_url, i.width, i.height, u.display_name as user_name
+          FROM images i
+          LEFT JOIN users u ON i.user_id = u.id
           ${whereClause} 
-          ${orderClause} 
+          ORDER BY i.${sortBy} ${sortOrder} 
           LIMIT ${pageSize} OFFSET ${offset}
         `;
         const [dataRows] = await this.connection!.execute(dataSql, queryParams);
@@ -668,6 +721,45 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw error;
       }
     }, '获取单张图片');
+  }
+
+  /**
+   * 更新图片画布位置
+   * 用于持久化画布功能（需求 2.1, 2.2, 2.3）
+   */
+  async updateImageCanvasPosition(id: string, canvasX: number, canvasY: number): Promise<SavedImage> {
+    return this.executeWithRetry(async () => {
+      const startTime = Date.now();
+      
+      try {
+        const sql = `
+          UPDATE images 
+          SET canvas_x = ?, canvas_y = ?, updated_at = ?
+          WHERE id = ?
+        `;
+        
+        const [result] = await this.connection!.execute(sql, [canvasX, canvasY, new Date(), id]);
+        
+        if ((result as any).affectedRows === 0) {
+          throw new Error(`图片不存在: ${id}`);
+        }
+        
+        // 获取更新后的数据
+        const [rows] = await this.connection!.execute('SELECT * FROM images WHERE id = ?', [id]);
+        const updatedImage = this.rowToSavedImage((rows as any[])[0]);
+        
+        const duration = Date.now() - startTime;
+        await this.logOperation('UPDATE', 'images', id, 'SUCCESS', null, duration);
+        
+        console.log(`图片画布位置更新成功: ${id} -> (${canvasX}, ${canvasY})`);
+        return updatedImage;
+
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        await this.logOperation('UPDATE', 'images', id, 'FAILED', error.message, duration);
+        throw error;
+      }
+    }, '更新图片画布位置');
   }
 
   /**
@@ -1537,7 +1629,18 @@ export class DatabaseServiceImpl implements DatabaseService {
       tags,
       favorite: Boolean(row.favorite),
       ossKey: row.oss_key || undefined,
-      ossUploaded: Boolean(row.oss_uploaded)
+      ossUploaded: Boolean(row.oss_uploaded),
+      userId: row.user_id || undefined,           // 创建者用户 ID
+      userName: row.user_name || row.display_name || undefined,  // 创建者名称
+      projectId: row.project_id || undefined,     // 所属项目 ID
+      isDeleted: Boolean(row.is_deleted),         // 是否已删除
+      deletedAt: row.deleted_at ? new Date(row.deleted_at) : undefined,
+      deletedBy: row.deleted_by || undefined,
+      canvasX: row.canvas_x !== null && row.canvas_x !== undefined ? Number(row.canvas_x) : undefined,
+      canvasY: row.canvas_y !== null && row.canvas_y !== undefined ? Number(row.canvas_y) : undefined,
+      thumbnailUrl: row.thumbnail_url || undefined,
+      width: row.width !== null && row.width !== undefined ? Number(row.width) : undefined,
+      height: row.height !== null && row.height !== undefined ? Number(row.height) : undefined
     };
   }
 

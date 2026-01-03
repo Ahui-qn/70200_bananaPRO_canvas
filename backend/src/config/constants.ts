@@ -6,6 +6,7 @@
 // 数据库表名
 export const TABLE_NAMES = {
   USERS: 'users',
+  PROJECTS: 'projects',
   IMAGES: 'images',
   USER_CONFIGS: 'user_configs', 
   OPERATION_LOGS: 'operation_logs',

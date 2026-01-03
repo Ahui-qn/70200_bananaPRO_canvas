@@ -49,8 +49,14 @@ export class DatabaseInitializer {
       // 创建 users 表（用户登录系统）
       await this.createUsersTable();
       
+      // 创建 projects 表（项目管理）
+      await this.createProjectsTable();
+      
       // 创建 images 表
       await this.createImagesTable();
+      
+      // 更新现有表结构（添加新字段）
+      await this.updateExistingTables();
       
       // 创建 user_configs 表
       await this.createUserConfigsTable();
@@ -112,6 +118,8 @@ export class DatabaseInitializer {
         username VARCHAR(50) NOT NULL COMMENT '登录用户名',
         password_hash VARCHAR(255) NOT NULL COMMENT 'bcrypt加密的密码',
         display_name VARCHAR(100) NOT NULL COMMENT '显示名称',
+        role ENUM('user', 'admin') DEFAULT 'user' COMMENT '用户角色',
+        current_project_id VARCHAR(36) NULL COMMENT '当前项目ID',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
         last_login_at TIMESTAMP NULL COMMENT '最后登录时间',
@@ -124,6 +132,45 @@ export class DatabaseInitializer {
     
     await this.connection.execute(sql);
     console.log('users 表创建成功');
+  }
+
+  /**
+   * 创建 projects 表（项目管理）
+   */
+  private async createProjectsTable(): Promise<void> {
+    // 检查表是否已存在
+    const [tables] = await this.connection.execute(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+      [TABLE_NAMES.PROJECTS]
+    );
+    
+    if ((tables as any[]).length > 0) {
+      console.log('projects 表已存在，跳过创建');
+      return;
+    }
+    
+    console.log('创建 projects 表...');
+    
+    const sql = `
+      CREATE TABLE IF NOT EXISTS ${TABLE_NAMES.PROJECTS} (
+        id VARCHAR(36) NOT NULL COMMENT '项目唯一标识符（UUID格式）',
+        name VARCHAR(100) NOT NULL COMMENT '项目名称',
+        description TEXT COMMENT '项目描述',
+        cover_image_url TEXT COMMENT '封面图片URL',
+        created_by VARCHAR(36) NOT NULL COMMENT '创建者用户ID',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+        is_deleted BOOLEAN DEFAULT FALSE COMMENT '是否已删除（软删除）',
+        deleted_at TIMESTAMP NULL COMMENT '删除时间',
+        deleted_by VARCHAR(36) NULL COMMENT '删除者用户ID',
+        canvas_state JSON COMMENT '画布状态（视口位置、缩放比例）',
+        
+        PRIMARY KEY (id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目表'
+    `;
+    
+    await this.connection.execute(sql);
+    console.log('projects 表创建成功');
   }
 
   /**
@@ -159,7 +206,14 @@ export class DatabaseInitializer {
         favorite BOOLEAN DEFAULT FALSE COMMENT '是否收藏',
         oss_key TEXT COMMENT 'OSS对象键名',
         oss_uploaded BOOLEAN DEFAULT FALSE COMMENT '是否已上传到OSS',
-        user_id VARCHAR(50) DEFAULT '${DEFAULT_VALUES.DEFAULT_USER_ID}' COMMENT '用户ID（预留字段）',
+        user_id VARCHAR(50) DEFAULT '${DEFAULT_VALUES.DEFAULT_USER_ID}' COMMENT '用户ID',
+        project_id VARCHAR(36) NULL COMMENT '所属项目ID',
+        is_deleted BOOLEAN DEFAULT FALSE COMMENT '是否已删除（软删除）',
+        deleted_at TIMESTAMP NULL COMMENT '删除时间',
+        deleted_by VARCHAR(36) NULL COMMENT '删除者用户ID',
+        canvas_x INT DEFAULT NULL COMMENT '图片在画布上的 X 坐标',
+        canvas_y INT DEFAULT NULL COMMENT '图片在画布上的 Y 坐标',
+        thumbnail_url TEXT COMMENT '缩略图 URL',
         
         PRIMARY KEY (id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图片信息表'
@@ -167,6 +221,59 @@ export class DatabaseInitializer {
     
     await this.connection.execute(sql);
     console.log('images 表创建成功');
+  }
+
+  /**
+   * 更新现有表结构（添加新字段）
+   */
+  private async updateExistingTables(): Promise<void> {
+    console.log('检查并更新现有表结构...');
+    
+    // 更新 users 表
+    await this.addColumnIfNotExists(TABLE_NAMES.USERS, 'role', "ENUM('user', 'admin') DEFAULT 'user' COMMENT '用户角色'");
+    await this.addColumnIfNotExists(TABLE_NAMES.USERS, 'current_project_id', "VARCHAR(36) NULL COMMENT '当前项目ID'");
+    
+    // 更新 images 表
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'project_id', "VARCHAR(36) NULL COMMENT '所属项目ID'");
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'is_deleted', "BOOLEAN DEFAULT FALSE COMMENT '是否已删除（软删除）'");
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'deleted_at', "TIMESTAMP NULL COMMENT '删除时间'");
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'deleted_by', "VARCHAR(36) NULL COMMENT '删除者用户ID'");
+    
+    // 更新 images 表 - 添加画布位置字段（持久化画布功能）
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'canvas_x', "INT DEFAULT NULL COMMENT '图片在画布上的 X 坐标'");
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'canvas_y', "INT DEFAULT NULL COMMENT '图片在画布上的 Y 坐标'");
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'thumbnail_url', "TEXT COMMENT '缩略图 URL'");
+    
+    // 更新 images 表 - 添加图片尺寸字段（图片实际尺寸功能）
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'width', "INT UNSIGNED COMMENT '图片实际宽度（像素）'");
+    await this.addColumnIfNotExists(TABLE_NAMES.IMAGES, 'height', "INT UNSIGNED COMMENT '图片实际高度（像素）'");
+    
+    // 更新 projects 表 - 添加画布状态字段（持久化画布功能）
+    await this.addColumnIfNotExists(TABLE_NAMES.PROJECTS, 'canvas_state', "JSON COMMENT '画布状态（视口位置、缩放比例）'");
+    
+    console.log('表结构更新完成');
+  }
+
+  /**
+   * 如果列不存在则添加
+   */
+  private async addColumnIfNotExists(tableName: string, columnName: string, columnDefinition: string): Promise<void> {
+    try {
+      const [columns] = await this.connection.execute(
+        'SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+        [tableName, columnName]
+      );
+      
+      if ((columns as any[]).length === 0) {
+        await this.connection.execute(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+        console.log(`已添加列 ${tableName}.${columnName}`);
+      }
+    } catch (error: any) {
+      // 如果列已存在，忽略错误
+      if (!error.message.includes('Duplicate column name')) {
+        console.warn(`添加列 ${tableName}.${columnName} 时出现警告:`, error.message);
+      }
+    }
   }
 
   /**
@@ -293,14 +400,22 @@ export class DatabaseInitializer {
       // users 表索引
       [TABLE_NAMES.USERS, 'idx_users_is_active', 'is_active'],
       [TABLE_NAMES.USERS, 'idx_users_created_at', 'created_at'],
+      [TABLE_NAMES.USERS, 'idx_users_role', 'role'],
+      
+      // projects 表索引
+      [TABLE_NAMES.PROJECTS, 'idx_projects_created_by', 'created_by'],
+      [TABLE_NAMES.PROJECTS, 'idx_projects_is_deleted', 'is_deleted'],
+      [TABLE_NAMES.PROJECTS, 'idx_projects_created_at', 'created_at'],
       
       // images 表索引
       [TABLE_NAMES.IMAGES, 'idx_images_created_at', 'created_at'],
       [TABLE_NAMES.IMAGES, 'idx_images_model', 'model'],
       [TABLE_NAMES.IMAGES, 'idx_images_favorite', 'favorite'],
       [TABLE_NAMES.IMAGES, 'idx_images_user_id', 'user_id'],
+      [TABLE_NAMES.IMAGES, 'idx_images_project_id', 'project_id'],
       [TABLE_NAMES.IMAGES, 'idx_images_oss_uploaded', 'oss_uploaded'],
       [TABLE_NAMES.IMAGES, 'idx_images_updated_at', 'updated_at'],
+      [TABLE_NAMES.IMAGES, 'idx_images_is_deleted', 'is_deleted'],
       
       // operation_logs 表索引
       [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_created_at', 'created_at'],
@@ -317,6 +432,7 @@ export class DatabaseInitializer {
       // 复合索引
       [TABLE_NAMES.IMAGES, 'idx_images_user_favorite', 'user_id, favorite'],
       [TABLE_NAMES.IMAGES, 'idx_images_model_created', 'model, created_at'],
+      [TABLE_NAMES.IMAGES, 'idx_images_project_deleted', 'project_id, is_deleted'],
       [TABLE_NAMES.OPERATION_LOGS, 'idx_logs_table_operation', 'table_name, operation'],
     ];
     
@@ -393,7 +509,7 @@ export class DatabaseInitializer {
   private async validateTableStructure(): Promise<void> {
     console.log('验证表结构完整性...');
     
-    const requiredTables = [TABLE_NAMES.USERS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS];
+    const requiredTables = [TABLE_NAMES.USERS, TABLE_NAMES.PROJECTS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS];
     
     for (const tableName of requiredTables) {
       const checkResult = await this.checkTableStructure(tableName);
@@ -480,9 +596,9 @@ export class DatabaseInitializer {
           TABLE_COMMENT as comment
         FROM information_schema.TABLES 
         WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME IN (?, ?, ?, ?)
+          AND TABLE_NAME IN (?, ?, ?, ?, ?)
         ORDER BY TABLE_NAME
-      `, [TABLE_NAMES.USERS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
+      `, [TABLE_NAMES.USERS, TABLE_NAMES.PROJECTS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
       
       for (const row of tableStats as any[]) {
         (stats.tables as any)[row.tableName] = {
@@ -504,10 +620,10 @@ export class DatabaseInitializer {
           GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) as columns
         FROM information_schema.STATISTICS 
         WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME IN (?, ?, ?, ?)
+          AND TABLE_NAME IN (?, ?, ?, ?, ?)
         GROUP BY TABLE_NAME, INDEX_NAME
         ORDER BY TABLE_NAME, INDEX_NAME
-      `, [TABLE_NAMES.USERS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
+      `, [TABLE_NAMES.USERS, TABLE_NAMES.PROJECTS, TABLE_NAMES.IMAGES, TABLE_NAMES.USER_CONFIGS, TABLE_NAMES.OPERATION_LOGS]);
       
       for (const row of indexStats as any[]) {
         if (!(stats.indexes as any)[row.tableName]) {

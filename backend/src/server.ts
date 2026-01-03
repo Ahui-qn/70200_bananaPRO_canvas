@@ -11,6 +11,8 @@ import databaseRouter from './routes/database.js';
 import generateRouter from './routes/generate.js';
 import refImagesRouter from './routes/refImages.js';
 import authRouter from './routes/auth.js';
+import projectsRouter from './routes/projects.js';
+import trashRouter from './routes/trash.js';
 
 // 导入中间件
 import { authMiddleware } from './middleware/auth.js';
@@ -111,6 +113,8 @@ app.use('/api/config', authMiddleware, configRouter);
 app.use('/api/database', authMiddleware, databaseRouter);
 app.use('/api/generate', authMiddleware, generateRouter);
 app.use('/api/ref-images', authMiddleware, refImagesRouter);
+app.use('/api/projects', authMiddleware, projectsRouter);
+app.use('/api/trash', authMiddleware, trashRouter);
 
 // 错误处理中间件
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -151,6 +155,8 @@ const startServer = async () => {
     console.log(`   - 数据库: /api/database`);
     console.log(`   - 图片生成: /api/generate`);
     console.log(`   - 参考图片: /api/ref-images`);
+    console.log(`   - 项目管理: /api/projects`);
+    console.log(`   - 回收站: /api/trash`);
   });
 };
 

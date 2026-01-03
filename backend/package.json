@@ -3,15 +3,21 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server-simple.ts",
-    "dev:full": "tsx watch src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "vitest --run",
     "user:create": "tsx src/scripts/manage-users.ts create",
     "user:list": "tsx src/scripts/manage-users.ts list",
     "user:disable": "tsx src/scripts/manage-users.ts disable",
-    "user:enable": "tsx src/scripts/manage-users.ts enable"
+    "user:enable": "tsx src/scripts/manage-users.ts enable",
+    "user:set-role": "tsx src/scripts/manage-users.ts set-role",
+    "update:dimensions": "tsx src/scripts/update-image-dimensions.ts",
+    "cleanup:all": "tsx src/scripts/cleanup-all-data.ts --force",
+    "cleanup:database": "tsx src/scripts/cleanup-database-only.ts",
+    "cleanup:oss-orphans": "tsx src/scripts/cleanup-orphaned-oss-files.ts",
+    "test:oss-permissions": "tsx src/scripts/test-oss-permissions.ts",
+    "check:db": "tsx src/scripts/check-database-status.ts"
   },
   "dependencies": {
     "ali-oss": "^6.23.0",
@@ -23,6 +29,7 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.16.0",
+    "sharp": "^0.34.5",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

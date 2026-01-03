@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>调试用户信息</title>
+</head>
+<body>
+    <h1>当前用户信息调试</h1>
+    <div id="info"></div>
+    
+    <script>
+        const token = localStorage.getItem('auth_token');
+        const user = localStorage.getItem('auth_user');
+        
+        const infoDiv = document.getElementById('info');
+        
+        infoDiv.innerHTML = `
+            <h2>本地存储信息：</h2>
+            <p><strong>Token:</strong> ${token ? '存在' : '不存在'}</p>
+            <p><strong>用户信息:</strong></p>
+            <pre>${user ? JSON.stringify(JSON.parse(user), null, 2) : '不存在'}</pre>
+            
+            <h2>操作：</h2>
+            <button onclick="clearStorage()">清除本地存储</button>
+            <button onclick="location.reload()">刷新页面</button>
+        `;
+        
+        function clearStorage() {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_user');
+            alert('本地存储已清除，请刷新页面');
+        }
+    </script>
+</body>
+</html>

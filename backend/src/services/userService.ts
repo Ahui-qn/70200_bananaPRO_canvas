@@ -2,7 +2,7 @@
  * 用户服务
  * 提供用户创建、验证、查询等功能
  * 
- * 需求: 3.1, 3.3, 3.4, 4.1
+ * 需求: 3.1, 3.3, 3.4, 4.1, 10.1, 10.2
  */
 
 import bcrypt from 'bcrypt';
@@ -14,12 +14,15 @@ import { TABLE_NAMES } from '../config/constants.js';
 // bcrypt 加密轮数（cost factor）
 const BCRYPT_ROUNDS = 10;
 
+// 用户角色类型
+export type UserRole = 'user' | 'admin';
+
 /**
  * 用户服务接口
  */
 export interface UserService {
   // 创建用户（管理员使用）
-  createUser(username: string, password: string, displayName: string): Promise<User>;
+  createUser(username: string, password: string, displayName: string, role?: UserRole): Promise<User>;
   
   // 验证用户凭据
   validateCredentials(username: string, password: string): Promise<User | null>;
@@ -41,6 +44,12 @@ export interface UserService {
   
   // 启用用户
   enableUser(userId: string): Promise<void>;
+  
+  // 检查用户是否为管理员
+  isAdmin(userId: string): Promise<boolean>;
+  
+  // 更新用户角色
+  updateUserRole(userId: string, role: UserRole): Promise<void>;
 }
 
 /**
@@ -53,12 +62,13 @@ export class UserServiceImpl implements UserService {
    * @param username 用户名
    * @param password 明文密码
    * @param displayName 显示名称
+   * @param role 用户角色（默认为 'user'）
    * @returns 创建的用户对象
    * @throws 如果用户名已存在或创建失败
    * 
-   * 需求: 3.1, 3.3, 4.1
+   * 需求: 3.1, 3.3, 4.1, 10.1
    */
-  async createUser(username: string, password: string, displayName: string): Promise<User> {
+  async createUser(username: string, password: string, displayName: string, role: UserRole = 'user'): Promise<User> {
     // 验证输入
     if (!username || username.trim() === '') {
       throw new Error('用户名不能为空');
@@ -90,6 +100,7 @@ export class UserServiceImpl implements UserService {
       username: username.trim(),
       passwordHash,
       displayName: displayName.trim(),
+      role,
       createdAt: now,
       updatedAt: now,
       lastLoginAt: null,
@@ -104,9 +115,9 @@ export class UserServiceImpl implements UserService {
 
     const sql = `
       INSERT INTO ${TABLE_NAMES.USERS} (
-        id, username, password_hash, display_name, 
+        id, username, password_hash, display_name, role,
         created_at, updated_at, last_login_at, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     await connection.execute(sql, [
@@ -114,13 +125,14 @@ export class UserServiceImpl implements UserService {
       user.username,
       user.passwordHash,
       user.displayName,
+      user.role,
       user.createdAt,
       user.updatedAt,
       user.lastLoginAt,
       user.isActive
     ]);
 
-    console.log(`用户创建成功: ${user.username} (${user.id})`);
+    console.log(`用户创建成功: ${user.username} (${user.id}), 角色: ${user.role}`);
     return user;
   }
 
@@ -217,7 +229,7 @@ export class UserServiceImpl implements UserService {
 
     // 只查询公开字段，不包含 password_hash
     const sql = `
-      SELECT id, username, display_name, last_login_at 
+      SELECT id, username, display_name, role, last_login_at 
       FROM ${TABLE_NAMES.USERS} 
       ORDER BY created_at DESC
     `;
@@ -305,6 +317,7 @@ export class UserServiceImpl implements UserService {
       username: row.username,
       passwordHash: row.password_hash,
       displayName: row.display_name,
+      role: row.role || 'user',
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
       lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : null,
@@ -321,8 +334,50 @@ export class UserServiceImpl implements UserService {
       id: row.id,
       username: row.username,
       displayName: row.display_name,
+      role: row.role || 'user',
       lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : null
     };
+  }
+
+  /**
+   * 检查用户是否为管理员
+   * 
+   * @param userId 用户 ID
+   * @returns 是否为管理员
+   * 
+   * 需求: 10.2
+   */
+  async isAdmin(userId: string): Promise<boolean> {
+    const user = await this.getUserById(userId);
+    return user?.role === 'admin';
+  }
+
+  /**
+   * 更新用户角色
+   * 
+   * @param userId 用户 ID
+   * @param role 新角色
+   * 
+   * 需求: 10.2
+   */
+  async updateUserRole(userId: string, role: UserRole): Promise<void> {
+    const connection = databaseService.getConnection();
+    if (!connection) {
+      throw new Error('数据库未连接');
+    }
+
+    const sql = `
+      UPDATE ${TABLE_NAMES.USERS} 
+      SET role = ?, updated_at = ? 
+      WHERE id = ?
+    `;
+    const [result] = await connection.execute(sql, [role, new Date(), userId]);
+    
+    if ((result as any).affectedRows === 0) {
+      throw new Error('用户不存在');
+    }
+
+    console.log(`用户角色已更新: ${userId} -> ${role}`);
   }
 }
 

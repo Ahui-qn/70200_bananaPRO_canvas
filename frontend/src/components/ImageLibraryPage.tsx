@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/api';
-import { SavedImage } from '../../../shared/types';
+import { SavedImage, CanvasImage } from '../../../shared/types';
+import { useProject } from '../contexts/ProjectContext';
+import { ImagePreviewModal } from './ImagePreviewModal';
 import {
   ArrowLeft,
   Image as ImageIcon,
@@ -8,8 +10,6 @@ import {
   Download,
   Trash2,
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
   AlertCircle,
   Search,
   Grid3X3,
@@ -17,6 +17,10 @@ import {
   Calendar,
   Sparkles,
   X,
+  FolderOpen,
+  User,
+  Loader2,
+  Maximize2,
 } from 'lucide-react';
 
 interface ImageLibraryPageProps {
@@ -24,26 +28,92 @@ interface ImageLibraryPageProps {
   onSelectImage?: (imageUrl: string) => void;
 }
 
+/**
+ * 获取图片尺寸显示文本
+ */
+const getImageSizeText = (image: SavedImage): string => {
+  if (image.width && image.height) {
+    return `${image.width} × ${image.height}`;
+  }
+  return image.imageSize || '未知';
+};
+
+/**
+ * 计算图片的宽高比样式
+ */
+const getImageAspectStyle = (image: SavedImage): React.CSSProperties => {
+  const width = image.width || 400;
+  const height = image.height || 400;
+  return {
+    aspectRatio: `${width} / ${height}`,
+  };
+};
+
 export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
   onBack,
   onSelectImage,
 }) => {
+  const { projects } = useProject();
   const [images, setImages] = useState<SavedImage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false); // 加载更多状态
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [hasMore, setHasMore] = useState(true); // 是否还有更多数据
   const [totalCount, setTotalCount] = useState(0);
   const [selectedImage, setSelectedImage] = useState<SavedImage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterFavorite, setFilterFavorite] = useState<boolean | undefined>(undefined);
+  const [filterProjectId, setFilterProjectId] = useState<string | undefined>(undefined);
   const [gridSize, setGridSize] = useState<'small' | 'large'>('large');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);  // 预览模态框图片
+  
+  // 滚动容器引用
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // 底部观察元素引用
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
+  // 初始加载和筛选条件变化时重置并加载
   useEffect(() => {
-    loadImages();
-  }, [page, filterFavorite]);
+    setImages([]);
+    setPage(1);
+    setHasMore(true);
+    loadImages(1, true);
+  }, [filterFavorite, filterProjectId, searchQuery]);
+
+  // 使用 Intersection Observer 实现无限滚动
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting && hasMore && !loading && !loadingMore) {
+          loadMoreImages();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentRef = loadMoreRef.current;
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, [hasMore, loading, loadingMore, page]);
+
+  // 加载更多图片
+  const loadMoreImages = useCallback(() => {
+    if (!hasMore || loading || loadingMore) return;
+    const nextPage = page + 1;
+    setPage(nextPage);
+    loadImages(nextPage, false);
+  }, [hasMore, loading, loadingMore, page]);
 
   // 加载图片详情（包含 ref_images）
   const loadImageDetail = async (imageId: string) => {
@@ -66,26 +136,53 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
     loadImageDetail(image.id);
   };
 
-  const loadImages = async () => {
+  // 点击放大图标打开预览模态框
+  const handlePreviewImage = (image: SavedImage, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    // 转换为 CanvasImage 格式
+    const canvasImage: CanvasImage = {
+      ...image,
+      x: image.canvasX ?? 0,
+      y: image.canvasY ?? 0,
+      loadingState: 'loaded',
+      isVisible: true,
+    };
+    setPreviewImage(canvasImage);
+  };
+
+  const loadImages = async (pageNum: number = 1, reset: boolean = false) => {
     try {
-      setLoading(true);
+      if (reset) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
       setError(null);
 
+      const pageSize = gridSize === 'small' ? 24 : 20;
       const response = await apiService.getImages({
-        page,
-        pageSize: gridSize === 'small' ? 24 : 12,
+        page: pageNum,
+        pageSize,
         sortBy: 'created_at',
         sortOrder: 'DESC',
         filters: {
           favorite: filterFavorite,
           search: searchQuery || undefined,
+          projectId: filterProjectId,
         }
       });
 
       if (response.success && response.data) {
-        setImages(response.data.data || []);
-        setTotalPages(response.data.totalPages || 1);
+        const newImages = response.data.data || [];
+        
+        if (reset) {
+          setImages(newImages);
+        } else {
+          setImages(prev => [...prev, ...newImages]);
+        }
+        
         setTotalCount(response.data.total || 0);
+        setHasMore(response.data.hasNext || false);
       } else {
         setError(response.error || '加载图片失败');
       }
@@ -93,12 +190,23 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
       setError(err.message || '加载图片失败');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   const handleSearch = () => {
+    setImages([]);
     setPage(1);
-    loadImages();
+    setHasMore(true);
+    loadImages(1, true);
+  };
+
+  // 刷新列表
+  const handleRefresh = () => {
+    setImages([]);
+    setPage(1);
+    setHasMore(true);
+    loadImages(1, true);
   };
 
   const handleToggleFavorite = async (image: SavedImage, e?: React.MouseEvent) => {
@@ -220,6 +328,22 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
 
             {/* 右侧：筛选和视图切换 */}
             <div className="flex items-center gap-2">
+              {/* 项目筛选下拉框 */}
+              <select
+                value={filterProjectId || ''}
+                onChange={(e) => {
+                  setFilterProjectId(e.target.value || undefined);
+                }}
+                className="btn-glass px-3 py-2.5 rounded-xl text-sm text-zinc-300 bg-transparent border border-zinc-700 focus:outline-none focus:border-violet-500 cursor-pointer"
+              >
+                <option value="" className="bg-zinc-800">全部项目</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id} className="bg-zinc-800">
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+
               <button
                 onClick={() => setFilterFavorite(filterFavorite === true ? undefined : true)}
                 className={`btn-glass flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm ${
@@ -250,7 +374,7 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
               </div>
               
               <button
-                onClick={loadImages}
+                onClick={handleRefresh}
                 disabled={loading}
                 className="btn-glass p-2.5 rounded-xl text-zinc-400 hover:text-zinc-100"
               >
@@ -264,7 +388,10 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
       {/* 主内容区域 */}
       <div className="relative z-10 flex h-[calc(100vh-73px)]">
         {/* 图片网格 */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div 
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-6"
+        >
           {loading && images.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
@@ -278,7 +405,7 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
                 <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
                 <p className="text-zinc-300 mb-4">{error}</p>
                 <button
-                  onClick={loadImages}
+                  onClick={handleRefresh}
                   className="btn-primary px-6 py-2.5 rounded-xl text-sm font-medium"
                 >
                   重试
@@ -297,32 +424,47 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
             </div>
           ) : (
             <>
-              <div className={`grid gap-4 ${
+              {/* 使用 CSS columns 实现 Masonry 布局，保持真实比例 */}
+              <div className={`${
                 gridSize === 'small' 
-                  ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' 
-                  : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
+                  ? 'columns-2 sm:columns-3 md:columns-4 lg:columns-6 gap-4' 
+                  : 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 gap-4'
               }`}>
                 {images.map((image) => (
                   <div
                     key={image.id}
-                    className={`image-card relative group cursor-pointer rounded-xl overflow-hidden ${
+                    className={`image-card relative group cursor-pointer rounded-xl overflow-hidden break-inside-avoid mb-4 ${
                       selectedImage?.id === image.id ? 'ring-2 ring-violet-500' : ''
                     }`}
                     onClick={() => handleSelectImage(image)}
                   >
-                    <div className={`relative ${gridSize === 'small' ? 'aspect-square' : 'aspect-[4/3]'}`}>
+                    <div className="relative">
                       <img
-                        src={image.url}
+                        src={image.thumbnailUrl || image.url}
                         alt={image.prompt}
-                        className="w-full h-full object-cover"
+                        className="w-full object-cover"
+                        style={getImageAspectStyle(image)}
                         loading="lazy"
                       />
+                      
+                      {/* 尺寸标签 - 左上角 */}
+                      <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/70 text-white text-xs rounded border border-white/20 backdrop-blur-sm">
+                        {getImageSizeText(image)}
+                      </div>
                       
                       {/* 悬浮遮罩 */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                       
                       {/* 悬浮操作按钮 */}
                       <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* 放大预览按钮 */}
+                        <button
+                          onClick={(e) => handlePreviewImage(image, e)}
+                          className="p-2 bg-black/40 text-white rounded-lg backdrop-blur-sm hover:bg-violet-500/80 transition-colors"
+                          title="放大预览"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={(e) => handleToggleFavorite(image, e)}
                           className={`p-2 rounded-lg backdrop-blur-sm transition-colors ${
@@ -351,8 +493,8 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
                       </div>
 
                       {/* 收藏标记 */}
-                      {image.favorite && (
-                        <div className="absolute top-2 left-2">
+                      {image.favorite && !selectedImage && (
+                        <div className="absolute top-10 left-2">
                           <Heart className="w-4 h-4 text-red-500 drop-shadow-lg" fill="currentColor" />
                         </div>
                       )}
@@ -371,52 +513,22 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
                 ))}
               </div>
 
-              {/* 分页 */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-4 mt-8 pb-4">
-                  <button
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    className="btn-glass p-2.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-                  <div className="flex items-center gap-2">
-                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                      let pageNum;
-                      if (totalPages <= 5) {
-                        pageNum = i + 1;
-                      } else if (page <= 3) {
-                        pageNum = i + 1;
-                      } else if (page >= totalPages - 2) {
-                        pageNum = totalPages - 4 + i;
-                      } else {
-                        pageNum = page - 2 + i;
-                      }
-                      return (
-                        <button
-                          key={pageNum}
-                          onClick={() => setPage(pageNum)}
-                          className={`w-10 h-10 rounded-xl text-sm font-medium transition-colors ${
-                            page === pageNum
-                              ? 'bg-violet-600 text-white'
-                              : 'btn-glass text-zinc-400 hover:text-zinc-100'
-                          }`}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
+              {/* 无限滚动加载更多 */}
+              <div 
+                ref={loadMoreRef} 
+                className="flex items-center justify-center py-8"
+              >
+                {loadingMore ? (
+                  <div className="flex items-center gap-2 text-zinc-500">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm">加载更多...</span>
                   </div>
-                  <button
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                    className="btn-glass p-2.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
+                ) : hasMore ? (
+                  <div className="text-zinc-600 text-sm">向下滚动加载更多</div>
+                ) : images.length > 0 ? (
+                  <div className="text-zinc-600 text-sm">已加载全部 {totalCount} 张图片</div>
+                ) : null}
+              </div>
             </>
           )}
         </div>
@@ -458,8 +570,8 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
                   <p className="text-sm text-zinc-200 font-medium">{selectedImage.model}</p>
                 </div>
                 <div className="glass-subtle rounded-xl p-3">
-                  <label className="text-xs text-zinc-500 block mb-1">尺寸</label>
-                  <p className="text-sm text-zinc-200 font-medium">{selectedImage.imageSize}</p>
+                  <label className="text-xs text-zinc-500 block mb-1">像素尺寸</label>
+                  <p className="text-sm text-zinc-200 font-medium">{getImageSizeText(selectedImage)}</p>
                 </div>
                 <div className="glass-subtle rounded-xl p-3">
                   <label className="text-xs text-zinc-500 block mb-1">宽高比</label>
@@ -475,6 +587,30 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
               <div className="flex items-center gap-2 text-xs text-zinc-500">
                 <Calendar className="w-3.5 h-3.5" />
                 <span>{formatDate(selectedImage.createdAt)}</span>
+              </div>
+
+              {/* 所属项目和创建者信息 */}
+              <div className="space-y-2">
+                {/* 所属项目 */}
+                <div className="flex items-center gap-2 text-xs">
+                  <FolderOpen className="w-3.5 h-3.5 text-violet-400" />
+                  <span className="text-zinc-500">所属项目：</span>
+                  <span className="text-zinc-300">
+                    {selectedImage.projectId 
+                      ? (projects.find(p => p.id === selectedImage.projectId)?.name || '未知项目')
+                      : '未分配'}
+                  </span>
+                </div>
+                {/* 创建者 - 显示用户名称 */}
+                {(selectedImage.userName || selectedImage.userId) && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <User className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-zinc-500">创建者：</span>
+                    <span className="text-zinc-300">
+                      {selectedImage.userName || (selectedImage.userId === 'default' ? '系统默认' : '未知用户')}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* 参考图片展示 */}
@@ -584,6 +720,24 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* 图片预览模态框 */}
+      <ImagePreviewModal
+        image={previewImage}
+        isOpen={!!previewImage}
+        onClose={() => setPreviewImage(null)}
+        onFavorite={async (imageId) => {
+          const image = images.find(img => img.id === imageId);
+          if (image) {
+            await handleToggleFavorite(image);
+            // 更新预览图片的收藏状态
+            if (previewImage && previewImage.id === imageId) {
+              setPreviewImage({ ...previewImage, favorite: !previewImage.favorite });
+            }
+          }
+        }}
+        onDownload={(image) => handleDownload(image as SavedImage)}
+      />
     </div>
   );
 };

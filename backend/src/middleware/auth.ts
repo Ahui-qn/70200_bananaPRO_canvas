@@ -85,6 +85,7 @@ export const authMiddleware = async (
         id: user.id,
         username: user.username,
         displayName: user.displayName,
+        role: user.role,
         lastLoginAt: user.lastLoginAt
       };
     } catch (dbError) {
@@ -94,6 +95,7 @@ export const authMiddleware = async (
         id: payload.userId,
         username: payload.username,
         displayName: payload.displayName,
+        role: payload.role,
         lastLoginAt: null
       };
     }
@@ -137,6 +139,7 @@ export const optionalAuthMiddleware = async (
         id: payload.userId,
         username: payload.username,
         displayName: payload.displayName,
+        role: payload.role,
         lastLoginAt: null
       };
     }
@@ -186,6 +189,7 @@ export const createAuthMiddleware = (options?: {
           id: payload.userId,
           username: payload.username,
           displayName: payload.displayName,
+          role: payload.role,
           lastLoginAt: null
         };
       } else {
@@ -205,6 +209,7 @@ export const createAuthMiddleware = (options?: {
           id: user.id,
           username: user.username,
           displayName: user.displayName,
+          role: user.role,
           lastLoginAt: user.lastLoginAt
         };
       }

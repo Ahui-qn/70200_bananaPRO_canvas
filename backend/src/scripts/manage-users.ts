@@ -107,9 +107,9 @@ async function listUsers(): Promise<void> {
     }
 
     console.log(`📋 用户列表 (共 ${users.length} 个用户):`);
-    console.log('─'.repeat(80));
-    console.log('ID'.padEnd(40) + '用户名'.padEnd(20) + '显示名称'.padEnd(15) + '最后登录');
-    console.log('─'.repeat(80));
+    console.log('─'.repeat(100));
+    console.log('ID'.padEnd(40) + '用户名'.padEnd(15) + '显示名称'.padEnd(15) + '角色'.padEnd(10) + '最后登录');
+    console.log('─'.repeat(100));
     
     for (const user of users) {
       const lastLogin = user.lastLoginAt 
@@ -117,13 +117,14 @@ async function listUsers(): Promise<void> {
         : '从未登录';
       console.log(
         user.id.padEnd(40) + 
-        user.username.padEnd(20) + 
+        user.username.padEnd(15) + 
         user.displayName.padEnd(15) + 
+        user.role.padEnd(10) + 
         lastLogin
       );
     }
     
-    console.log('─'.repeat(80));
+    console.log('─'.repeat(100));
   } catch (error: any) {
     console.error('❌ 获取用户列表失败:', error.message);
     process.exit(1);
@@ -185,6 +186,50 @@ async function enableUser(args: Record<string, string>): Promise<void> {
 }
 
 /**
+ * 修改用户角色
+ */
+async function setUserRole(args: Record<string, string>): Promise<void> {
+  const { username, role } = args;
+
+  if (!username) {
+    console.error('❌ 缺少用户名参数');
+    console.log('用法: npm run user:set-role -- --username=用户名 --role=角色');
+    process.exit(1);
+  }
+
+  if (!role) {
+    console.error('❌ 缺少角色参数');
+    console.log('用法: npm run user:set-role -- --username=用户名 --role=角色');
+    console.log('可用角色: admin, user');
+    process.exit(1);
+  }
+
+  if (!['admin', 'user'].includes(role)) {
+    console.error('❌ 无效的角色，可用角色: admin, user');
+    process.exit(1);
+  }
+
+  try {
+    const user = await userService.getUserByUsername(username);
+    if (!user) {
+      console.error(`❌ 用户不存在: ${username}`);
+      process.exit(1);
+    }
+
+    // 直接更新数据库中的用户角色
+    await databaseService.executeQuery(
+      'UPDATE users SET role = ? WHERE id = ?',
+      [role, user.id]
+    );
+
+    console.log(`✅ 用户角色已更新: ${username} -> ${role}`);
+  } catch (error: any) {
+    console.error('❌ 修改用户角色失败:', error.message);
+    process.exit(1);
+  }
+}
+
+/**
  * 显示帮助信息
  */
 function showHelp(): void {
@@ -196,22 +241,26 @@ function showHelp(): void {
   npm run user:list
   npm run user:disable -- --username=用户名
   npm run user:enable -- --username=用户名
+  npm run user:set-role -- --username=用户名 --role=角色
 
 命令:
-  create    创建新用户
-  list      列出所有用户
-  disable   禁用用户
-  enable    启用用户
+  create      创建新用户
+  list        列出所有用户
+  disable     禁用用户
+  enable      启用用户
+  set-role    修改用户角色
 
 参数:
   --username    用户名（登录时使用）
   --password    密码（至少6位）
   --name        显示名称
+  --role        用户角色（admin 或 user）
 
 示例:
   npm run user:create -- --username=zhangsan --password=123456 --name="张三"
   npm run user:list
   npm run user:disable -- --username=zhangsan
+  npm run user:set-role -- --username=admin --role=admin
 `);
 }
 
@@ -248,6 +297,9 @@ async function main(): Promise<void> {
         break;
       case 'enable':
         await enableUser(args);
+        break;
+      case 'set-role':
+        await setUserRole(args);
         break;
       default:
         console.error(`❌ 未知命令: ${command}`);

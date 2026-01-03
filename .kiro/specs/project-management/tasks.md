@@ -1,23 +1,23 @@
 # 实现计划
 
-- [ ] 1. 数据库结构更新
-  - [ ] 1.1 创建 projects 表
+- [x] 1. 数据库结构更新
+  - [x] 1.1 创建 projects 表
     - 在 database-schema.sql 中添加 projects 表定义
     - 在 databaseInitializer.ts 中添加表创建逻辑
     - 字段：id, name, description, cover_image_url, created_by, created_at, updated_at, is_deleted, deleted_at, deleted_by
     - _需求: 2.3, 3.1_
-  - [ ] 1.2 更新 images 表添加软删除字段
+  - [x] 1.2 更新 images 表添加软删除字段
     - 添加 project_id 字段
     - 添加 is_deleted, deleted_at, deleted_by 字段
     - 添加相关索引
     - _需求: 4.1, 7.2_
-  - [ ] 1.3 更新 users 表添加角色字段
+  - [x] 1.3 更新 users 表添加角色字段
     - 添加 role 字段（enum: 'user', 'admin'）
     - 添加 current_project_id 字段
     - _需求: 10.1_
 
-- [ ] 2. 后端项目服务实现
-  - [ ] 2.1 创建项目服务 (projectService.ts)
+- [x] 2. 后端项目服务实现
+  - [x] 2.1 创建项目服务 (projectService.ts)
     - 实现 createProject 方法
     - 实现 getProjects 方法（排除已删除）
     - 实现 getProjectById 方法
@@ -25,7 +25,7 @@
     - 实现 softDeleteProject 方法（级联软删除图片）
     - 实现 getOrCreateDefaultProject 方法
     - _需求: 1.1, 2.3, 3.1, 3.2, 6.2, 7.1, 7.3_
-  - [ ] 2.2 编写项目服务属性测试
+  - [x] 2.2 编写项目服务属性测试
     - **属性 1: 默认项目自动创建**
     - **属性 2: 项目列表不包含已删除项目**
     - **属性 3: 项目创建者正确设置**
@@ -34,8 +34,8 @@
     - **属性 9: 项目删除级联**
     - **验证: 需求 1.1, 1.3, 2.3, 3.1, 3.2, 6.2, 6.3, 7.1, 7.3**
 
-- [ ] 3. 后端回收站服务实现
-  - [ ] 3.1 创建回收站服务 (trashService.ts)
+- [x] 3. 后端回收站服务实现
+  - [x] 3.1 创建回收站服务 (trashService.ts)
     - 实现 getTrashItems 方法（获取已删除的项目和图片）
     - 实现 restoreProject 方法（级联恢复图片）
     - 实现 restoreImage 方法（检查项目状态）
@@ -43,7 +43,7 @@
     - 实现 hardDeleteImage 方法（删除 OSS 文件）
     - 实现 emptyTrash 方法
     - _需求: 8.2, 8.3, 8.4, 8.5, 9.4, 9.5_
-  - [ ] 3.2 编写回收站服务属性测试
+  - [x] 3.2 编写回收站服务属性测试
     - **属性 8: 软删除记录删除信息**
     - **属性 10: 回收站内容正确**
     - **属性 11: 恢复操作正确**
@@ -52,19 +52,19 @@
     - **属性 14: 硬删除级联**
     - **验证: 需求 7.5, 8.2, 8.3, 8.4, 8.5, 9.4, 9.5**
 
-- [ ] 4. 后端权限服务实现
-  - [ ] 4.1 更新用户服务添加角色支持
+- [x] 4. 后端权限服务实现
+  - [x] 4.1 更新用户服务添加角色支持
     - 修改 createUser 默认角色为 'user'
     - 添加 isAdmin 检查方法
     - 添加 updateUserRole 方法
     - _需求: 10.1, 10.2_
-  - [ ] 4.2 编写权限相关属性测试
+  - [x] 4.2 编写权限相关属性测试
     - **属性 15: 权限检查**
     - **属性 16: 默认用户角色**
     - **验证: 需求 10.1, 10.2, 10.3**
 
-- [ ] 5. 后端 API 路由实现
-  - [ ] 5.1 创建项目路由 (routes/projects.ts)
+- [x] 5. 后端 API 路由实现
+  - [x] 5.1 创建项目路由 (routes/projects.ts)
     - GET /api/projects - 获取项目列表
     - GET /api/projects/:id - 获取项目详情
     - POST /api/projects - 创建项目
@@ -73,7 +73,7 @@
     - GET /api/projects/current - 获取当前项目
     - PUT /api/projects/:id/switch - 切换项目
     - _需求: 1.2, 2.3, 3.1, 6.2, 7.1_
-  - [ ] 5.2 创建回收站路由 (routes/trash.ts)
+  - [x] 5.2 创建回收站路由 (routes/trash.ts)
     - GET /api/trash - 获取回收站内容
     - POST /api/trash/restore/project/:id - 恢复项目
     - POST /api/trash/restore/image/:id - 恢复图片
@@ -81,53 +81,53 @@
     - DELETE /api/trash/image/:id - 永久删除图片（仅管理员）
     - DELETE /api/trash/empty - 清空回收站（仅管理员）
     - _需求: 8.2, 8.3, 9.4_
-  - [ ] 5.3 修改图片删除逻辑为软删除
+  - [x] 5.3 修改图片删除逻辑为软删除
     - 修改 databaseService.ts 的 deleteImage 方法
     - 修改 routes/images.ts 的删除接口
     - 不再直接删除 OSS 文件
     - _需求: 7.2_
 
-- [ ] 6. 检查点 - 确保所有后端测试通过
+- [x] 6. 检查点 - 确保所有后端测试通过
   - 确保所有测试通过，如有问题请询问用户。
 
-- [ ] 7. 更新图片服务支持项目筛选
-  - [ ] 7.1 修改图片查询添加 project_id 筛选
+- [x] 7. 更新图片服务支持项目筛选
+  - [x] 7.1 修改图片查询添加 project_id 筛选
     - 修改 getImages 方法支持 project_id 参数
     - 默认排除已删除图片
     - _需求: 4.3, 5.2_
-  - [ ] 7.2 修改图片保存添加 project_id
+  - [x] 7.2 修改图片保存添加 project_id
     - 修改 saveImage 方法接收 project_id 参数
     - 修改 generate.ts 传递当前项目 ID
     - _需求: 4.1, 4.2_
-  - [ ] 7.3 编写图片项目关联属性测试
+  - [x] 7.3 编写图片项目关联属性测试
     - **属性 5: 图片关联项目**
     - **属性 6: 按项目筛选图片**
     - **验证: 需求 4.1, 4.2, 4.3, 5.2, 5.3**
 
-- [ ] 8. 更新 server.ts 注册新路由
+- [x] 8. 更新 server.ts 注册新路由
   - 注册 /api/projects 路由
   - 注册 /api/trash 路由
   - 添加认证中间件保护
   - _需求: 2.3, 8.2_
 
-- [ ] 9. 前端类型定义更新
-  - [ ] 9.1 更新 shared/types.ts
+- [x] 9. 前端类型定义更新
+  - [x] 9.1 更新 shared/types.ts
     - 添加 Project 接口
     - 添加 TrashItem 接口
     - 更新 User 接口添加 role 字段
     - 更新 SavedImage 接口添加 project_id 和软删除字段
     - _需求: 2.3, 8.2, 10.1_
 
-- [ ] 10. 前端项目上下文实现
-  - [ ] 10.1 创建 ProjectContext (contexts/ProjectContext.tsx)
+- [x] 10. 前端项目上下文实现
+  - [x] 10.1 创建 ProjectContext (contexts/ProjectContext.tsx)
     - 管理当前项目状态
     - 提供 switchProject 方法
     - 提供 createProject 方法
     - 应用启动时初始化项目
     - _需求: 1.1, 1.2, 2.4_
 
-- [ ] 11. 前端项目切换器组件
-  - [ ] 11.1 创建 ProjectSwitcher 组件 (components/ProjectSwitcher.tsx)
+- [x] 11. 前端项目切换器组件
+  - [x] 11.1 创建 ProjectSwitcher 组件 (components/ProjectSwitcher.tsx)
     - 显示当前项目名称
     - 点击展开项目列表弹窗
     - 大卡片 UI 展示项目（名称、描述、封面、创建者、图片数量）
@@ -136,8 +136,8 @@
     - 删除项目功能（软删除）
     - _需求: 2.1, 2.2, 2.3, 2.4, 2.5, 3.2, 3.3, 6.1, 7.1_
 
-- [ ] 12. 前端回收站组件
-  - [ ] 12.1 创建 TrashBin 组件 (components/TrashBin.tsx)
+- [x] 12. 前端回收站组件
+  - [x] 12.1 创建 TrashBin 组件 (components/TrashBin.tsx)
     - 大卡片 UI 展示已删除项目和图片
     - 分类显示（项目/图片标签页）
     - 显示删除时间和删除者
@@ -145,23 +145,23 @@
     - 管理员可见永久删除按钮
     - _需求: 8.1, 8.2, 8.3, 9.1, 9.2, 9.3_
 
-- [ ] 13. 前端集成
-  - [ ] 13.1 更新 CanvasApp.tsx
+- [x] 13. 前端集成
+  - [x] 13.1 更新 CanvasApp.tsx
     - 添加 ProjectContext Provider
     - 在左上角添加 ProjectSwitcher
     - 添加回收站入口按钮
     - _需求: 2.1_
-  - [ ] 13.2 更新 ImageLibraryPage.tsx
+  - [x] 13.2 更新 ImageLibraryPage.tsx
     - 使用当前项目 ID 筛选图片
     - 修改删除按钮为软删除
     - _需求: 5.2, 7.2_
-  - [ ] 13.3 更新 api.ts 添加项目和回收站 API
+  - [x] 13.3 更新 api.ts 添加项目和回收站 API
     - 添加项目相关 API 调用
     - 添加回收站相关 API 调用
     - _需求: 2.3, 8.2_
-  - [ ] 13.4 更新图片生成逻辑传递项目 ID
+  - [x] 13.4 更新图片生成逻辑传递项目 ID
     - 修改 handleGenerate 传递当前项目 ID
     - _需求: 4.1_
 
-- [ ] 14. 最终检查点 - 确保所有测试通过
+- [x] 14. 最终检查点 - 确保所有测试通过
   - 确保所有测试通过，如有问题请询问用户。

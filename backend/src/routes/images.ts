@@ -2,6 +2,7 @@ import express from 'express';
 import { ApiResponse, PaginatedResponse, SavedImage, GetImagesRequest, CreateImageRequest, UpdateImageRequest } from '@shared/types';
 import { databaseService } from '../services/databaseService.js';
 import { aliOssService } from '../services/aliOssService.js';
+import { trashService } from '../services/trashService.js';
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ router.get('/', async (req, res) => {
         dateFrom: req.query.dateFrom as string,
         dateTo: req.query.dateTo as string,
         search: req.query.search as string,
+        projectId: req.query.projectId as string,  // 支持按项目 ID 筛选（需求 4.3, 5.2）
       }
     };
 
@@ -150,10 +152,14 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// 删除图片（同时删除 OSS 文件）
+// 删除图片（软删除，移入回收站）
+// 需求 7.2: 用户删除图片时系统将图片标记为已删除（软删除）并移入回收站
 router.delete('/:id', async (req, res) => {
   try {
-    // 先获取图片信息，以便删除 OSS 文件
+    // 获取当前用户 ID（从认证中间件获取）
+    const deletedBy = (req as any).user?.userId || 'unknown';
+    
+    // 先检查图片是否存在
     const image = await databaseService.getImageById(req.params.id);
     
     if (!image) {
@@ -164,23 +170,12 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json(response);
     }
 
-    // 如果图片已上传到 OSS，先删除 OSS 文件
-    if (image.ossUploaded && image.ossKey && aliOssService.isConfigured()) {
-      try {
-        await aliOssService.deleteObject(image.ossKey);
-        console.log('OSS 文件删除成功:', image.ossKey);
-      } catch (ossError: any) {
-        console.warn('删除 OSS 文件失败:', ossError.message);
-        // OSS 删除失败不阻止数据库删除
-      }
-    }
-
-    // 删除数据库记录
-    await databaseService.deleteImage(req.params.id);
+    // 执行软删除（不删除 OSS 文件，保留以便恢复）
+    await trashService.softDeleteImage(req.params.id, deletedBy);
 
     const response: ApiResponse = {
       success: true,
-      message: '图片删除成功'
+      message: '图片已移入回收站'
     };
 
     res.json(response);
@@ -194,7 +189,8 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// 批量删除图片（同时删除 OSS 文件）
+// 批量删除图片（软删除，移入回收站）
+// 需求 7.2: 用户删除图片时系统将图片标记为已删除（软删除）并移入回收站
 router.delete('/', async (req, res) => {
   try {
     const { ids } = req.body;
@@ -207,37 +203,33 @@ router.delete('/', async (req, res) => {
       return res.status(400).json(response);
     }
 
-    let ossDeleteSuccess = 0;
-    let ossDeleteFailed = 0;
+    // 获取当前用户 ID（从认证中间件获取）
+    const deletedBy = (req as any).user?.userId || 'unknown';
 
-    // 先获取所有图片信息并删除 OSS 文件
+    let successCount = 0;
+    let failedCount = 0;
+    const failedIds: string[] = [];
+
+    // 批量软删除
     for (const id of ids) {
       try {
-        const image = await databaseService.getImageById(id);
-        if (image && image.ossUploaded && image.ossKey && aliOssService.isConfigured()) {
-          try {
-            await aliOssService.deleteObject(image.ossKey);
-            ossDeleteSuccess++;
-          } catch (ossError) {
-            ossDeleteFailed++;
-          }
-        }
-      } catch (e) {
-        // 忽略获取图片信息的错误
+        await trashService.softDeleteImage(id, deletedBy);
+        successCount++;
+      } catch (error: any) {
+        failedCount++;
+        failedIds.push(id);
+        console.warn(`软删除图片 ${id} 失败:`, error.message);
       }
     }
-
-    // 删除数据库记录
-    const result = await databaseService.deleteImages(ids);
 
     const response: ApiResponse = {
       success: true,
       data: {
-        ...result,
-        ossDeleteSuccess,
-        ossDeleteFailed
+        success: successCount,
+        failed: failedCount,
+        failedIds
       },
-      message: `批量删除完成：数据库成功 ${result.success} 张，失败 ${result.failed} 张；OSS 成功 ${ossDeleteSuccess} 张，失败 ${ossDeleteFailed} 张`
+      message: `批量删除完成：成功 ${successCount} 张，失败 ${failedCount} 张`
     };
 
     res.json(response);
@@ -267,6 +259,54 @@ router.get('/stats/summary', async (req, res) => {
     const response: ApiResponse = {
       success: false,
       error: error.message || '获取统计信息失败'
+    };
+    res.status(500).json(response);
+  }
+});
+
+/**
+ * PATCH /api/images/:id/canvas-position
+ * 更新图片画布位置
+ * 需求: 2.1, 2.2, 2.3
+ */
+router.patch('/:id/canvas-position', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { canvasX, canvasY } = req.body;
+    
+    // 验证参数
+    if (typeof canvasX !== 'number' || typeof canvasY !== 'number') {
+      const response: ApiResponse = {
+        success: false,
+        error: '无效的画布位置参数，canvasX 和 canvasY 必须是数字'
+      };
+      return res.status(400).json(response);
+    }
+    
+    const updatedImage = await databaseService.updateImageCanvasPosition(id, canvasX, canvasY);
+    
+    const response: ApiResponse<SavedImage> = {
+      success: true,
+      data: updatedImage,
+      message: '图片画布位置更新成功'
+    };
+    
+    res.json(response);
+  } catch (error: any) {
+    console.error('更新图片画布位置失败:', error);
+    
+    // 检查是否是图片不存在的错误
+    if (error.message?.includes('图片不存在')) {
+      const response: ApiResponse = {
+        success: false,
+        error: '图片不存在'
+      };
+      return res.status(404).json(response);
+    }
+    
+    const response: ApiResponse = {
+      success: false,
+      error: error.message || '更新图片画布位置失败'
     };
     res.status(500).json(response);
   }

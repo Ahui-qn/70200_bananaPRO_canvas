@@ -7,11 +7,15 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
+// 用户角色类型
+type UserRole = 'user' | 'admin';
+
 // 用户信息类型
 interface UserInfo {
   id: string;
   username: string;
   displayName: string;
+  role: UserRole;           // 用户角色（需求 10.1）
   lastLoginAt: Date | null;
 }
 

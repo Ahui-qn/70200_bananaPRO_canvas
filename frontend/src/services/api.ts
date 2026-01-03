@@ -15,7 +15,11 @@ import {
   OSSConfig,
   SaveConfigRequest,
   DatabaseStatistics,
-  ImageStatistics
+  ImageStatistics,
+  Project,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  TrashContent
 } from '../../../shared/types';
 import { getAuthToken } from '../contexts/AuthContext';
 
@@ -263,6 +267,131 @@ class ApiService {
     return this.request('/test', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  // ========== 项目管理（需求 2.3） ==========
+  
+  async getProjects(): Promise<ApiResponse<Project[]>> {
+    return this.request('/projects');
+  }
+
+  async getProject(id: string): Promise<ApiResponse<Project>> {
+    return this.request(`/projects/${id}`);
+  }
+
+  async getCurrentProject(): Promise<ApiResponse<Project>> {
+    return this.request('/projects/current');
+  }
+
+  async createProject(data: CreateProjectRequest): Promise<ApiResponse<Project>> {
+    return this.request('/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProject(id: string, data: UpdateProjectRequest): Promise<ApiResponse<Project>> {
+    return this.request(`/projects/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProject(id: string): Promise<ApiResponse> {
+    return this.request(`/projects/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async switchProject(id: string): Promise<ApiResponse<Project>> {
+    return this.request(`/projects/${id}/switch`, {
+      method: 'PUT',
+    });
+  }
+
+  // ========== 回收站管理（需求 8.2） ==========
+  
+  async getTrashItems(): Promise<ApiResponse<TrashContent>> {
+    return this.request('/trash');
+  }
+
+  async restoreProject(id: string): Promise<ApiResponse<Project>> {
+    return this.request(`/trash/restore/project/${id}`, {
+      method: 'POST',
+    });
+  }
+
+  async restoreImage(id: string): Promise<ApiResponse> {
+    return this.request(`/trash/restore/image/${id}`, {
+      method: 'POST',
+    });
+  }
+
+  async hardDeleteProject(id: string): Promise<ApiResponse> {
+    return this.request(`/trash/project/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async hardDeleteImage(id: string): Promise<ApiResponse> {
+    return this.request(`/trash/image/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async emptyTrash(): Promise<ApiResponse> {
+    return this.request('/trash/empty', {
+      method: 'DELETE',
+    });
+  }
+
+  // ========== 画布持久化（需求 1.1, 2.1, 3.1） ==========
+
+  /**
+   * 获取项目画布图片
+   * 返回项目所有图片及其画布位置，同时返回画布状态
+   */
+  async getProjectCanvasImages(projectId: string): Promise<ApiResponse<{
+    images: SavedImage[];
+    canvasState: { viewportX: number; viewportY: number; scale: number; lastUpdated?: Date } | null;
+  }>> {
+    return this.request(`/projects/${projectId}/canvas-images`);
+  }
+
+  /**
+   * 更新图片画布位置
+   */
+  async updateImageCanvasPosition(imageId: string, canvasX: number, canvasY: number): Promise<ApiResponse> {
+    return this.request(`/images/${imageId}/canvas-position`, {
+      method: 'PATCH',
+      body: JSON.stringify({ canvasX, canvasY }),
+    });
+  }
+
+  /**
+   * 获取画布状态
+   */
+  async getCanvasState(projectId: string): Promise<ApiResponse<{
+    viewportX: number;
+    viewportY: number;
+    scale: number;
+    lastUpdated?: Date;
+  } | null>> {
+    return this.request(`/projects/${projectId}/canvas-state`);
+  }
+
+  /**
+   * 保存画布状态
+   */
+  async saveCanvasState(projectId: string, state: {
+    viewportX: number;
+    viewportY: number;
+    scale: number;
+  }): Promise<ApiResponse> {
+    return this.request(`/projects/${projectId}/canvas-state`, {
+      method: 'PUT',
+      body: JSON.stringify(state),
     });
   }
 }

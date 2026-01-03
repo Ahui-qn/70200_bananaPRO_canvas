@@ -4,6 +4,7 @@ import { nanoBananaService } from '../services/nanoBananaService.js';
 import { databaseService } from '../services/databaseService.js';
 import { aliOssService } from '../services/aliOssService.js';
 import { referenceImageService } from '../services/referenceImageService.js';
+import { imageDimensionService } from '../services/imageDimensionService.js';
 
 const router = express.Router();
 
@@ -128,7 +129,7 @@ router.get('/:taskId', async (req, res) => {
 router.post('/:taskId/save', async (req, res) => {
   try {
     const { taskId } = req.params;
-    const { imageUrl, prompt, model, aspectRatio, imageSize, refImages } = req.body;
+    const { imageUrl, prompt, model, aspectRatio, imageSize, refImages, projectId, canvasX, canvasY } = req.body;
     
     if (!imageUrl) {
       const response: ApiResponse = {
@@ -140,6 +141,8 @@ router.post('/:taskId/save', async (req, res) => {
 
     // 从认证中间件获取当前用户 ID（需求 4.2）
     const userId = req.user?.id || 'default';
+    // 从请求体获取当前项目 ID（需求 4.1, 4.2）
+    const currentProjectId = projectId || null;
 
     // 生成图片 ID
     const imageId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -147,22 +150,70 @@ router.post('/:taskId/save', async (req, res) => {
     let finalUrl = imageUrl;
     let ossKey: string | undefined;
     let ossUploaded = false;
+    let thumbnailUrl: string | undefined;
+    let imageWidth: number | undefined;
+    let imageHeight: number | undefined;
 
-    // 尝试上传到 OSS
-    if (aliOssService.isConfigured()) {
-      try {
-        console.log('开始上传图片到 OSS...');
-        const uploadResult = await aliOssService.uploadFromUrl(imageUrl);
-        finalUrl = uploadResult.url;
-        ossKey = uploadResult.ossKey;
-        ossUploaded = true;
-        console.log('图片上传到 OSS 成功:', finalUrl);
-      } catch (ossError: any) {
-        console.warn('上传到 OSS 失败，使用原始 URL:', ossError.message);
-        // OSS 上传失败时继续使用原始 URL
+    // 使用图片尺寸服务处理图片（提取尺寸、生成缩略图）
+    try {
+      console.log('开始处理图片（提取尺寸、生成缩略图）...');
+      const processedImage = await imageDimensionService.processImageFromUrl(imageUrl);
+      
+      // 获取实际尺寸
+      imageWidth = processedImage.dimensions.width;
+      imageHeight = processedImage.dimensions.height;
+      console.log(`图片实际尺寸: ${imageWidth}x${imageHeight}`);
+
+      // 尝试上传到 OSS
+      if (aliOssService.isConfigured()) {
+        try {
+          console.log('开始上传图片到 OSS...');
+          // 上传原图
+          const uploadResult = await aliOssService.uploadFromBuffer(
+            processedImage.buffer,
+            'image/jpeg'
+          );
+          finalUrl = uploadResult.url;
+          ossKey = uploadResult.ossKey;
+          ossUploaded = true;
+          console.log('原图上传到 OSS 成功:', finalUrl);
+
+          // 上传缩略图
+          try {
+            const thumbResult = await aliOssService.uploadThumbnail(
+              processedImage.thumbnail.buffer,
+              uploadResult.ossKey
+            );
+            thumbnailUrl = thumbResult.url;
+            console.log('缩略图上传到 OSS 成功:', thumbnailUrl);
+          } catch (thumbError: any) {
+            console.warn('缩略图上传失败:', thumbError.message);
+            // 缩略图上传失败不影响主流程
+          }
+        } catch (ossError: any) {
+          console.warn('上传到 OSS 失败，使用原始 URL:', ossError.message);
+          // OSS 上传失败时继续使用原始 URL
+        }
+      } else {
+        console.log('OSS 未配置，使用原始 URL');
       }
-    } else {
-      console.log('OSS 未配置，使用原始 URL');
+    } catch (processError: any) {
+      console.warn('图片处理失败，使用原始 URL 和预设尺寸:', processError.message);
+      // 图片处理失败时，尝试直接上传原始 URL
+      if (aliOssService.isConfigured()) {
+        try {
+          const uploadResult = await aliOssService.uploadFromUrl(imageUrl);
+          finalUrl = uploadResult.url;
+          ossKey = uploadResult.ossKey;
+          ossUploaded = true;
+        } catch (ossError: any) {
+          console.warn('上传到 OSS 失败，使用原始 URL:', ossError.message);
+        }
+      }
+      // 使用预设尺寸
+      const defaultDimensions = imageDimensionService.getDefaultDimensions();
+      imageWidth = defaultDimensions.width;
+      imageHeight = defaultDimensions.height;
     }
 
     // 处理参考图片：如果是 Base64，先上传到 OSS
@@ -203,7 +254,7 @@ router.post('/:taskId/save', async (req, res) => {
       }
     }
 
-    // 创建图片记录 - 只保存参考图片的 OSS URL，不保存 Base64
+    // 创建图片记录 - 包含实际尺寸和缩略图 URL
     const savedImage = {
       id: imageId,
       url: finalUrl,
@@ -219,7 +270,13 @@ router.post('/:taskId/save', async (req, res) => {
       ossKey,
       ossUploaded,
       taskId,
-      userId  // 关联当前用户 ID（需求 4.2）
+      userId,           // 关联当前用户 ID（需求 4.2）
+      projectId: currentProjectId,  // 关联当前项目 ID（需求 4.1, 4.2）
+      canvasX: canvasX !== undefined ? canvasX : undefined,  // 画布 X 坐标
+      canvasY: canvasY !== undefined ? canvasY : undefined,  // 画布 Y 坐标
+      thumbnailUrl,     // 缩略图 URL
+      width: imageWidth,   // 图片实际宽度
+      height: imageHeight  // 图片实际高度
     };
 
     // 保存到数据库
@@ -231,6 +288,9 @@ router.post('/:taskId/save', async (req, res) => {
         ...result,
         ossUploaded,
         ossKey,
+        thumbnailUrl,
+        width: imageWidth,
+        height: imageHeight,
         refImagesProcessed: processedRefImages?.length || 0
       },
       message: ossUploaded ? '图片已上传到 OSS 并保存到数据库' : '图片已保存到数据库（OSS 未配置）'

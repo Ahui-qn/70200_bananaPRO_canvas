@@ -52,7 +52,8 @@ export class AuthServiceImpl implements AuthService {
     const payload = {
       userId: user.id,
       username: user.username,
-      displayName: user.displayName
+      displayName: user.displayName,
+      role: user.role || 'user'
     };
 
     return jwt.sign(payload, this.secret, {
@@ -103,6 +104,7 @@ export class AuthServiceImpl implements AuthService {
       id: payload.userId,
       username: payload.username,
       displayName: payload.displayName,
+      role: payload.role || 'user',
       lastLoginAt: null // 从令牌中无法获取最后登录时间
     };
   }
@@ -144,6 +146,7 @@ export class AuthServiceImpl implements AuthService {
         id: payload.userId,
         username: payload.username,
         displayName: payload.displayName,
+        role: payload.role || 'user',
         lastLoginAt: null
       });
     }

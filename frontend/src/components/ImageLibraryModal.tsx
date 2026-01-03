@@ -19,6 +19,31 @@ interface ImageLibraryModalProps {
   onSelectImage?: (imageUrl: string) => void;
 }
 
+/**
+ * 计算图片在网格中的显示尺寸
+ * 保持真实宽高比，限制最大高度
+ */
+const getImageDisplayStyle = (image: SavedImage): React.CSSProperties => {
+  const width = image.width || 400;
+  const height = image.height || 400;
+  const aspectRatio = width / height;
+  
+  // 基础宽度由 CSS grid 控制，这里只设置宽高比
+  return {
+    aspectRatio: `${width} / ${height}`,
+  };
+};
+
+/**
+ * 获取图片尺寸显示文本
+ */
+const getImageSizeText = (image: SavedImage): string => {
+  if (image.width && image.height) {
+    return `${image.width} × ${image.height}`;
+  }
+  return image.imageSize || '未知';
+};
+
 export const ImageLibraryModal: React.FC<ImageLibraryModalProps> = ({
   isOpen,
   onClose,
@@ -175,11 +200,11 @@ export const ImageLibraryModal: React.FC<ImageLibraryModalProps> = ({
                 <p className="text-sm mt-2">生成的图片将显示在这里</p>
               </div>
             ) : (
-              <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
+              <div className="columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4">
                 {images.map((image) => (
                   <div
                     key={image.id}
-                    className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                    className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all break-inside-avoid mb-4 ${
                       selectedImage?.id === image.id
                         ? 'border-purple-500'
                         : 'border-transparent hover:border-zinc-600'
@@ -187,11 +212,17 @@ export const ImageLibraryModal: React.FC<ImageLibraryModalProps> = ({
                     onClick={() => setSelectedImage(image)}
                   >
                     <img
-                      src={image.url}
+                      src={image.thumbnailUrl || image.url}
                       alt={image.prompt}
-                      className="w-full aspect-square object-cover"
+                      className="w-full object-cover"
+                      style={getImageDisplayStyle(image)}
                       loading="lazy"
                     />
+
+                    {/* 尺寸标签 - 左上角 */}
+                    <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/70 text-white text-xs rounded border border-white/20">
+                      {getImageSizeText(image)}
+                    </div>
 
                     {/* 悬浮操作 */}
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
@@ -287,8 +318,8 @@ export const ImageLibraryModal: React.FC<ImageLibraryModalProps> = ({
                     <p className="text-sm text-zinc-300">{selectedImage.model}</p>
                   </div>
                   <div>
-                    <label className="block text-xs text-zinc-500 mb-1">尺寸</label>
-                    <p className="text-sm text-zinc-300">{selectedImage.imageSize}</p>
+                    <label className="block text-xs text-zinc-500 mb-1">像素尺寸</label>
+                    <p className="text-sm text-zinc-300">{getImageSizeText(selectedImage)}</p>
                   </div>
                 </div>
 
