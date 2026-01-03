@@ -506,7 +506,7 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
       // 默认下载行为
       const link = document.createElement('a');
       link.href = image.url;
-      link.download = `nano-banana-${image.id}.png`;
+      link.download = `nano-banana-${image.id}.jpg`;
       link.click();
     }
   }, [onDownloadImage]);

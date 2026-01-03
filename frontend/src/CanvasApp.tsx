@@ -1684,7 +1684,7 @@ function CanvasApp() {
             {/* 操作按钮 */}
             <div className="flex gap-2 mt-4">
               <button
-                onClick={() => { const link = document.createElement('a'); link.href = showImageDetail.url; link.download = `nano-banana-${showImageDetail.id}.png`; link.click(); }}
+                onClick={() => { const link = document.createElement('a'); link.href = showImageDetail.url; link.download = `nano-banana-${showImageDetail.id}.jpg`; link.click(); }}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-3 btn-glass rounded-xl text-sm font-medium text-zinc-300"
               >
                 <Download className="w-4 h-4" />
@@ -1719,7 +1719,7 @@ function CanvasApp() {
         onDownload={(image) => {
           const link = document.createElement('a');
           link.href = image.url;
-          link.download = `nano-banana-${image.id}.png`;
+          link.download = `nano-banana-${image.id}.jpg`;
           link.click();
         }}
         onShare={(image) => {

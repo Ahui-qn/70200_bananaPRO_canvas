@@ -252,7 +252,7 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
     e?.stopPropagation();
     const link = document.createElement('a');
     link.href = image.url;
-    link.download = `nano-banana-${image.id}.png`;
+    link.download = `nano-banana-${image.id}.jpg`;
     link.target = '_blank';
     document.body.appendChild(link);
     link.click();

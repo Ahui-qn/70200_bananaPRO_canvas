@@ -578,6 +578,40 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
         </div>
       )}
 
+      {/* 生成进度显示区域 - 显示在对话框上方（需求 9.2） */}
+      {isGenerating && (
+        <div className="mb-2 pl-14 pr-14 animate-fade-in">
+          <div className="flex items-center gap-3 px-3 py-2 glass-card" style={{ borderRadius: '9999px' }}>
+            <Loader2 className="w-4 h-4 text-violet-400 animate-spin-smooth flex-shrink-0" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-zinc-400 animate-pulse-soft">
+                  {generationStatus || '正在生成图片...'}
+                </span>
+                <span className="text-xs text-zinc-500">{Math.round(generationProgress)}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-zinc-700/50 rounded-full overflow-hidden">
+                <div 
+                  className="h-full progress-animated transition-all duration-300 ease-out rounded-full"
+                  style={{ width: `${generationProgress}%` }}
+                />
+              </div>
+            </div>
+            {/* 取消按钮 - 暂时隐藏，保留代码以备后续其他模型使用
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="text-xs text-zinc-500 hover:text-red-400 transition-colors duration-150 flex-shrink-0"
+              >
+                取消
+              </button>
+            )}
+            */}
+          </div>
+        </div>
+      )}
+
       {/* 参考图预览区域 - 显示在对话框上方，与对话框左对齐 */}
       <div className="pl-14"> {/* 与模式切换按钮宽度 + gap 对齐 */}
         <RefImagePreview
@@ -680,59 +714,41 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
           </div>
         </div>
 
-        {/* 右侧：生成按钮（独立按钮） */}
+        {/* 右侧：生成按钮（独立按钮）- 生成中时禁用，不显示停止按钮 */}
         <button
           type="button"
-          onClick={isGenerating ? onCancel : handleGenerate}
-          disabled={!prompt.trim() && !isGenerating}
+          onClick={handleGenerate}
+          disabled={(!prompt.trim() && !isGenerating) || isGenerating}
           className={`w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200
             touch-target active:scale-95 btn-generate flex-shrink-0
-            ${isGenerating 
-              ? 'bg-red-500/80 hover:bg-red-500' 
-              : 'bg-gradient-to-br from-violet-500 to-indigo-600 hover:from-violet-400 hover:to-indigo-500 hover:shadow-xl hover:shadow-violet-500/30'}
-            ${!prompt.trim() && !isGenerating ? 'opacity-50 cursor-not-allowed' : ''}
+            bg-gradient-to-br from-violet-500 to-indigo-600 hover:from-violet-400 hover:to-indigo-500 hover:shadow-xl hover:shadow-violet-500/30
+            ${(!prompt.trim() || isGenerating) ? 'opacity-50 cursor-not-allowed' : ''}
             shadow-lg shadow-violet-500/20`}
-          title={isGenerating ? '取消生成' : '生成图片'}
+          title={isGenerating ? '生成中...' : '生成图片'}
         >
           {isGenerating ? (
-            <Square className="w-4 h-4 text-white" fill="currentColor" />
+            <Loader2 className="w-5 h-5 text-white animate-spin" />
           ) : (
             <Send className="w-5 h-5 text-white" />
           )}
         </button>
+        
+        {/* 停止生成按钮 - 暂时隐藏，保留代码以备后续其他模型使用
+        {isGenerating && onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200
+              touch-target active:scale-95 flex-shrink-0
+              bg-red-500/80 hover:bg-red-500
+              shadow-lg shadow-red-500/20"
+            title="停止生成"
+          >
+            <Square className="w-4 h-4 text-white" fill="currentColor" />
+          </button>
+        )}
+        */}
       </div>
-
-      {/* 生成进度显示区域（需求 9.2） */}
-      {isGenerating && (
-        <div className="mt-2 px-4 animate-fade-in">
-          <div className="flex items-center gap-3">
-            <Loader2 className="w-4 h-4 text-violet-400 animate-spin-smooth flex-shrink-0" />
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-zinc-400 animate-pulse-soft">
-                  {generationStatus || '正在生成图片...'}
-                </span>
-                <span className="text-xs text-zinc-500">{Math.round(generationProgress)}%</span>
-              </div>
-              <div className="w-full h-1.5 bg-zinc-700/50 rounded-full overflow-hidden">
-                <div 
-                  className="h-full progress-animated transition-all duration-300 ease-out rounded-full"
-                  style={{ width: `${generationProgress}%` }}
-                />
-              </div>
-            </div>
-            {onCancel && (
-              <button
-                type="button"
-                onClick={onCancel}
-                className="text-xs text-zinc-500 hover:text-red-400 transition-colors duration-150 flex-shrink-0"
-              >
-                取消
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* 生成错误提示（需求 9.6） */}
       {generationError && !isGenerating && (

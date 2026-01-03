@@ -90,7 +90,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
     } else {
       const link = document.createElement('a');
       link.href = image.url;
-      link.download = `nano-banana-${image.id}.png`;
+      link.download = `nano-banana-${image.id}.jpg`;
       link.click();
     }
   }, [image, onDownload]);
