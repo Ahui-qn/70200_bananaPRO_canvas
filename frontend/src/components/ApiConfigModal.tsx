@@ -131,32 +131,6 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
                   )}
                 </div>
               </div>
-
-              {/* API 地址 */}
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-2">
-                  API 地址
-                </label>
-                <input
-                  type="text"
-                  value={config.baseUrl}
-                  readOnly
-                  className="input-glass w-full px-3 py-2.5 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
-                />
-              </div>
-
-              {/* 提供商 */}
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-2">
-                  提供商
-                </label>
-                <input
-                  type="text"
-                  value={config.provider}
-                  readOnly
-                  className="input-glass w-full px-3 py-2.5 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
-                />
-              </div>
             </>
           )}
 
@@ -179,33 +153,6 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
               <span>{message.text}</span>
             </div>
           )}
-
-          {/* 配置提示 */}
-          {isConfigured && (
-            <div className="glass-subtle rounded-xl p-4">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="w-4 h-4 text-violet-400 mt-0.5 flex-shrink-0" />
-                <div className="text-xs text-zinc-400">
-                  <p className="font-medium text-zinc-300 mb-1.5">配置说明</p>
-                  <ul className="space-y-1">
-                    <li>• API 配置从 .env 文件读取</li>
-                    <li>• API Key 已部分隐藏以保护安全</li>
-                    <li>• 如需修改请编辑 backend/.env</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 底部按钮 */}
-        <div className="flex items-center justify-end p-5 border-t border-zinc-800/50">
-          <button
-            onClick={handleClose}
-            className="btn-glass px-4 py-2 rounded-xl text-sm text-zinc-300"
-          >
-            关闭
-          </button>
         </div>
       </div>
     </div>

@@ -1,10 +1,11 @@
 import express from 'express';
-import { ApiResponse, CreateImageRequest, NanoBananaResultData } from '@shared/types';
+import { ApiResponse, CreateImageRequest, NanoBananaResultData, SavedImage } from '@shared/types';
 import { nanoBananaService } from '../services/nanoBananaService.js';
 import { databaseService } from '../services/databaseService.js';
 import { aliOssService } from '../services/aliOssService.js';
 import { referenceImageService } from '../services/referenceImageService.js';
 import { imageDimensionService } from '../services/imageDimensionService.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
@@ -302,6 +303,77 @@ router.post('/:taskId/save', async (req, res) => {
     const response: ApiResponse = {
       success: false,
       error: error.message || '保存图片失败'
+    };
+    res.status(500).json(response);
+  }
+});
+
+/**
+ * 保存失败的图片记录
+ * POST /api/generate/save-failed
+ */
+router.post('/save-failed', async (req, res) => {
+  try {
+    const { 
+      prompt, 
+      model, 
+      aspectRatio, 
+      imageSize, 
+      projectId, 
+      canvasX, 
+      canvasY, 
+      width, 
+      height,
+      failureReason 
+    } = req.body;
+
+    // 验证必填字段
+    if (!prompt) {
+      return res.status(400).json({
+        success: false,
+        error: '缺少必填字段: prompt'
+      });
+    }
+
+    // 获取当前用户 ID
+    const userId = (req as any).user?.userId || 'default';
+
+    // 创建失败的图片记录
+    const failedImage: SavedImage = {
+      id: uuidv4(),
+      url: '',  // 失败时没有 URL
+      prompt,
+      model: model || 'nano-banana-fast',
+      aspectRatio: aspectRatio || 'auto',
+      imageSize: imageSize || '1K',
+      createdAt: new Date(),
+      favorite: false,
+      ossUploaded: false,
+      userId,
+      projectId: projectId || undefined,
+      canvasX: canvasX !== undefined ? canvasX : undefined,
+      canvasY: canvasY !== undefined ? canvasY : undefined,
+      width: width !== undefined ? width : undefined,
+      height: height !== undefined ? height : undefined,
+      status: 'failed',
+      failureReason: failureReason || '未知错误'
+    };
+
+    // 保存到数据库
+    const result = await databaseService.saveImage(failedImage);
+
+    const response: ApiResponse = {
+      success: true,
+      data: result,
+      message: '失败记录已保存'
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('保存失败记录失败:', error);
+    const response: ApiResponse = {
+      success: false,
+      error: error.message || '保存失败记录失败'
     };
     res.status(500).json(response);
   }

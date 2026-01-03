@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bananaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFE135;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16213e;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- 背景圆形 -->
+  <circle cx="50" cy="50" r="48" fill="url(#bgGrad)" stroke="#FFD700" stroke-width="2"/>
+  <!-- 香蕉主体 -->
+  <path d="M25 65 Q20 45 35 30 Q50 18 70 25 Q80 30 78 40 Q75 55 55 70 Q40 80 25 65" 
+        fill="url(#bananaGrad)" 
+        filter="url(#glow)"
+        stroke="#E6B800" 
+        stroke-width="1.5"/>
+  <!-- 香蕉顶部 -->
+  <ellipse cx="72" cy="30" rx="6" ry="4" fill="#8B4513" transform="rotate(-30 72 30)"/>
+  <!-- 香蕉纹理线条 -->
+  <path d="M30 60 Q35 45 50 35" stroke="#E6B800" stroke-width="1" fill="none" opacity="0.5"/>
+  <path d="M35 65 Q42 50 58 40" stroke="#E6B800" stroke-width="1" fill="none" opacity="0.4"/>
+  <!-- PRO 标签 -->
+  <rect x="55" y="60" width="30" height="16" rx="3" fill="#FF6B6B"/>
+  <text x="70" y="72" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white" text-anchor="middle">PRO</text>
+  <!-- 闪光效果 -->
+  <circle cx="35" cy="35" r="3" fill="white" opacity="0.6"/>
+  <circle cx="40" cy="40" r="1.5" fill="white" opacity="0.4"/>
+</svg>

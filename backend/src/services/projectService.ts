@@ -419,16 +419,18 @@ class ProjectService {
       imageSize: string;
       width: number | null;      // 图片实际宽度
       height: number | null;     // 图片实际高度
+      status: string;            // 图片生成状态
+      failureReason: string | null;  // 失败原因
       createdAt: Date;
     }>;
     canvasState: { viewportX: number; viewportY: number; scale: number; lastUpdated: Date | null } | null;
   }> {
-    // 获取项目的所有未删除图片（包含 width 和 height 字段）
+    // 获取项目的所有未删除图片（包含 width、height、status、failure_reason 字段）
     const imagesSql = `
       SELECT 
         id, url, thumbnail_url, prompt, model, 
         canvas_x, canvas_y, aspect_ratio, image_size, 
-        width, height, created_at
+        width, height, status, failure_reason, created_at
       FROM ${TABLE_NAMES.IMAGES}
       WHERE project_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)
       ORDER BY created_at DESC
@@ -436,10 +438,10 @@ class ProjectService {
     
     const imageRows = await databaseService.executeQuery(imagesSql, [projectId]);
     
-    // 转换图片数据（包含实际尺寸）
+    // 转换图片数据（包含实际尺寸和状态）
     const images = (imageRows as any[]).map(row => ({
       id: row.id,
-      url: row.url,
+      url: row.url || '',  // 失败时可能为空
       thumbnailUrl: row.thumbnail_url || null,
       prompt: row.prompt,
       model: row.model,
@@ -449,6 +451,8 @@ class ProjectService {
       imageSize: row.image_size || '1K',
       width: row.width !== null && row.width !== undefined ? Number(row.width) : null,
       height: row.height !== null && row.height !== undefined ? Number(row.height) : null,
+      status: row.status || 'success',
+      failureReason: row.failure_reason || null,
       createdAt: new Date(row.created_at)
     }));
     

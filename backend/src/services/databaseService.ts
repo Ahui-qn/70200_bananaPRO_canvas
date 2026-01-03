@@ -380,13 +380,13 @@ export class DatabaseServiceImpl implements DatabaseService {
           INSERT INTO images (
             id, url, original_url, prompt, model, aspect_ratio, image_size,
             ref_images, created_at, updated_at, tags, favorite, oss_key, oss_uploaded, user_id, project_id,
-            canvas_x, canvas_y, thumbnail_url, width, height
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            canvas_x, canvas_y, thumbnail_url, width, height, status, failure_reason
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         
         const values = [
           image.id,
-          image.url,
+          image.url || null,  // 失败时可为空
           image.originalUrl || null,
           image.prompt,
           image.model,
@@ -405,7 +405,9 @@ export class DatabaseServiceImpl implements DatabaseService {
           image.canvasY !== undefined ? image.canvasY : null,  // 画布 Y 坐标
           image.thumbnailUrl || null,  // 缩略图 URL
           image.width !== undefined ? image.width : null,      // 图片实际宽度
-          image.height !== undefined ? image.height : null     // 图片实际高度
+          image.height !== undefined ? image.height : null,    // 图片实际高度
+          image.status || 'success',   // 图片生成状态
+          image.failureReason || null  // 失败原因
         ];
 
         await this.connection!.execute(sql, values);
@@ -493,7 +495,7 @@ export class DatabaseServiceImpl implements DatabaseService {
         // 注意：不查询 ref_images 字段以避免排序内存问题
         // LEFT JOIN 用户表获取创建者名称
         const dataSql = `
-          SELECT i.id, i.url, i.prompt, i.model, i.aspect_ratio, i.image_size, i.tags, i.favorite, i.oss_uploaded, i.oss_key, i.created_at, i.updated_at, i.user_id, i.project_id, i.canvas_x, i.canvas_y, i.thumbnail_url, i.width, i.height, u.display_name as user_name
+          SELECT i.id, i.url, i.prompt, i.model, i.aspect_ratio, i.image_size, i.tags, i.favorite, i.oss_uploaded, i.oss_key, i.created_at, i.updated_at, i.user_id, i.project_id, i.canvas_x, i.canvas_y, i.thumbnail_url, i.width, i.height, i.status, i.failure_reason, u.display_name as user_name
           FROM images i
           LEFT JOIN users u ON i.user_id = u.id
           ${whereClause} 
@@ -1618,7 +1620,7 @@ export class DatabaseServiceImpl implements DatabaseService {
 
     return {
       id: row.id,
-      url: row.url,
+      url: row.url || '',  // 失败时可能为空
       originalUrl: row.original_url || undefined,
       prompt: row.prompt,
       model: row.model,
@@ -1640,7 +1642,9 @@ export class DatabaseServiceImpl implements DatabaseService {
       canvasY: row.canvas_y !== null && row.canvas_y !== undefined ? Number(row.canvas_y) : undefined,
       thumbnailUrl: row.thumbnail_url || undefined,
       width: row.width !== null && row.width !== undefined ? Number(row.width) : undefined,
-      height: row.height !== null && row.height !== undefined ? Number(row.height) : undefined
+      height: row.height !== null && row.height !== undefined ? Number(row.height) : undefined,
+      status: row.status || 'success',            // 图片生成状态
+      failureReason: row.failure_reason || undefined  // 失败原因
     };
   }
 

@@ -28,8 +28,10 @@ interface CanvasImageLayerProps {
   images: CanvasImage[];
   // 当前视口
   viewport: Viewport;
-  // 选中的图片 ID
+  // 选中的图片 ID（单选，向后兼容）
   selectedImageId: string | null;
+  // 选中的图片 ID 集合（多选）
+  selectedIds?: Set<string>;
   // 图片点击事件
   onImageMouseDown: (e: React.MouseEvent, imageId: string) => void;
   // 图片双击事件（查看详情）
@@ -117,8 +119,9 @@ const CanvasImageItem: React.FC<{
   onDownload,
   onShare,
 }) => {
-  const imgX = image.canvasX ?? image.x ?? 0;
-  const imgY = image.canvasY ?? image.y ?? 0;
+  // 优先使用运行时位置（x），因为它可能被用户拖动更新
+  const imgX = image.x ?? image.canvasX ?? 0;
+  const imgY = image.y ?? image.canvasY ?? 0;
   
   // 使用按比例计算的显示尺寸
   const { width: imgWidth, height: imgHeight } = getCanvasDisplaySize(image);
@@ -137,8 +140,11 @@ const CanvasImageItem: React.FC<{
     imageLoadingManager.getSourceType(scale)
   );
 
+  // 判断是否为失败状态（支持 status 字段和 isFailed 字段）
+  const isFailed = image.status === 'failed' || image.isFailed === true;
+
   // 判断是否为占位符（正在生成中）
-  const isGenerating = !image.url;
+  const isGenerating = !image.url && !isFailed;
 
   // 注册到加载管理器（只在首次挂载时执行）
   useEffect(() => {
@@ -251,7 +257,32 @@ const CanvasImageItem: React.FC<{
         handleDoubleClick();
       }}
     >
-      {isGenerating ? (
+      {isFailed ? (
+        // 失败状态显示
+        <div className="w-full h-full glass-card rounded-xl flex flex-col items-center justify-center gap-3 border border-red-500/30 bg-red-500/5">
+          <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+            <X className="w-6 h-6 text-red-400" />
+          </div>
+          <div className="text-center px-4">
+            <p className="text-sm text-red-400 mb-1">生成失败</p>
+            <p className="text-xs text-zinc-500 mb-2">{image.failureReason || '未知错误'}</p>
+          </div>
+          <p className="text-xs text-zinc-500 max-w-[90%] truncate px-4">{image.prompt}</p>
+          <div className="text-xs text-zinc-600 mt-1">
+            {image.model} · {image.aspectRatio} · {image.imageSize}
+          </div>
+          {/* 删除按钮 */}
+          <button
+            className="absolute top-2 right-2 btn-glass p-2 rounded-lg hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            <X className="w-3.5 h-3.5 text-zinc-300" />
+          </button>
+        </div>
+      ) : isGenerating ? (
         // 占位符 - 正在生成中
         <div className="w-full h-full glass-card rounded-xl flex flex-col items-center justify-center gap-4">
           <Loader2 className="w-12 h-12 text-violet-400 animate-spin" />
@@ -369,8 +400,9 @@ const CanvasImageItem: React.FC<{
 const ImagePlaceholder: React.FC<{
   image: CanvasImage;
 }> = ({ image }) => {
-  const imgX = image.canvasX ?? image.x ?? 0;
-  const imgY = image.canvasY ?? image.y ?? 0;
+  // 优先使用运行时位置（x），因为它可能被用户拖动更新
+  const imgX = image.x ?? image.canvasX ?? 0;
+  const imgY = image.y ?? image.canvasY ?? 0;
   
   // 使用按比例计算的显示尺寸
   const { width: imgWidth, height: imgHeight } = getCanvasDisplaySize(image);
@@ -431,6 +463,7 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
   images,
   viewport,
   selectedImageId,
+  selectedIds,
   onImageMouseDown,
   onImageDoubleClick,
   onDeleteImage,
@@ -488,6 +521,16 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
     }
   }, [onShareImage]);
 
+  // 判断图片是否被选中（支持单选和多选）
+  const isImageSelected = useCallback((imageId: string) => {
+    // 优先使用多选集合
+    if (selectedIds && selectedIds.size > 0) {
+      return selectedIds.has(imageId);
+    }
+    // 回退到单选
+    return selectedImageId === imageId;
+  }, [selectedIds, selectedImageId]);
+
   return (
     <>
       {/* 渲染视口外的轻量级占位符 */}
@@ -502,7 +545,7 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
         <CanvasImageItem
           key={img.id}
           image={img}
-          isSelected={selectedImageId === img.id}
+          isSelected={isImageSelected(img.id)}
           scale={scale}
           onMouseDown={(e) => handleImageMouseDown(e, img.id)}
           onDoubleClick={() => onImageDoubleClick(img)}

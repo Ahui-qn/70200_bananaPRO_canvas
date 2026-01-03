@@ -7,14 +7,37 @@
 
 /* CSS 变量 */
 :root {
-  --glass-bg: rgba(24, 24, 27, 0.7);
-  --glass-border: rgba(63, 63, 70, 0.5);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  /* 玻璃化效果变量 - 优化透明度和模糊度 */
+  --glass-bg: rgba(24, 24, 27, 0.75);
+  --glass-bg-light: rgba(24, 24, 27, 0.65);
+  --glass-bg-dark: rgba(24, 24, 27, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-light: rgba(255, 255, 255, 0.12);
+  --glass-blur: 20px;
+  --glass-blur-strong: 24px;
+  --glass-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.25),
+    0 4px 16px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-shadow-elevated: 
+    0 12px 40px rgba(0, 0, 0, 0.35),
+    0 6px 20px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  
+  /* 主题色 */
   --accent-primary: #8b5cf6;
   --accent-secondary: #6366f1;
+  --accent-glow: rgba(139, 92, 246, 0.25);
+  
+  /* 点矩阵背景 */
   --dot-color: rgba(63, 63, 70, 0.4);
   --dot-size: 1px;
   --dot-spacing: 24px;
+  
+  /* 动画时长 */
+  --transition-fast: 150ms;
+  --transition-normal: 200ms;
+  --transition-slow: 300ms;
 }
 
 /* 基础样式 */
@@ -36,28 +59,96 @@ body {
   background-position: center center;
 }
 
-/* 玻璃态效果 */
+/* 玻璃态效果 - 优化版本 */
 .glass {
   background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
 }
 
 .glass-subtle {
-  background: rgba(24, 24, 27, 0.5);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(63, 63, 70, 0.3);
+  background: rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
 .glass-card {
-  background: rgba(24, 24, 27, 0.6);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(63, 63, 70, 0.4);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+  background: rgba(24, 24, 27, 0.7);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow);
+}
+
+/* 对话框专用玻璃效果 - 增强可读性 */
+.glass-dialog {
+  background: rgba(24, 24, 27, 0.82);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+/* 配置面板玻璃效果 - 更高对比度 */
+.glass-panel {
+  background: rgba(24, 24, 27, 0.92);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--glass-shadow-elevated);
+}
+
+/* 悬浮控件玻璃效果 */
+.glass-floating {
+  background: rgba(24, 24, 27, 0.78);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* 独立按钮玻璃效果 - 用于拆分后的独立按钮 */
+.glass-button {
+  background: rgba(24, 24, 27, 0.78);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all var(--transition-normal) ease;
+}
+
+.glass-button:hover {
+  background: rgba(39, 39, 42, 0.85);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 
+    0 6px 20px rgba(0, 0, 0, 0.25),
+    0 3px 8px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.glass-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.glass-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* 画布容器 */
@@ -363,4 +454,460 @@ body {
 
 .animate-progress-pulse {
   animation: progress-pulse 1.5s ease-in-out infinite;
+}
+
+/* 向上滑动动画（配置面板展开） */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.2s ease-out;
+}
+
+/* ============================================
+   响应式布局优化
+   ============================================ */
+
+/* 移动端适配 - 小屏幕 */
+@media (max-width: 640px) {
+  /* 对话框在移动端全宽显示 */
+  .dialog-container {
+    max-width: 100% !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    bottom: 12px !important;
+  }
+  
+  /* 缩放控制在移动端更紧凑 */
+  .zoom-control-container {
+    left: 12px !important;
+    bottom: 80px !important;
+  }
+  
+  /* 配置面板在移动端全宽 */
+  .config-panel-mobile {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: 80px !important;
+    width: auto !important;
+  }
+}
+
+/* 平板适配 - 中等屏幕 */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .dialog-container {
+    max-width: 90% !important;
+  }
+}
+
+/* 大屏幕优化 */
+@media (min-width: 1280px) {
+  .dialog-container {
+    max-width: 900px !important;
+  }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+  /* 增大触摸目标 */
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  
+  /* 移除悬停效果，改用激活状态 */
+  .btn-glass:hover {
+    transform: none;
+  }
+  
+  .btn-glass:active {
+    background: rgba(63, 63, 70, 0.7);
+    transform: scale(0.98);
+  }
+  
+  /* 滑动条更大的触摸区域 */
+  .touch-slider::-webkit-slider-thumb {
+    width: 20px !important;
+    height: 20px !important;
+  }
+  
+  .touch-slider::-moz-range-thumb {
+    width: 20px !important;
+    height: 20px !important;
+  }
+}
+
+/* 横屏移动设备 */
+@media (max-height: 500px) and (orientation: landscape) {
+  .dialog-container {
+    bottom: 8px !important;
+    padding: 8px !important;
+  }
+  
+  .zoom-control-container {
+    bottom: 8px !important;
+  }
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-shimmer,
+  .animate-image-fade-in {
+    animation: none !important;
+  }
+  
+  .transition-all,
+  .transition-colors,
+  .transition-transform,
+  .transition-opacity,
+  .transition-shadow {
+    transition: none !important;
+  }
+}
+
+/* ============================================
+   动画效果优化
+   ============================================ */
+
+/* 配置面板展开动画 - 优化版本 */
+@keyframes panel-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panel-slide-down {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+.animate-panel-open {
+  animation: panel-slide-up var(--transition-normal) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-panel-close {
+  animation: panel-slide-down var(--transition-fast) cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* 下拉菜单动画 */
+@keyframes dropdown-open {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-dropdown {
+  animation: dropdown-open var(--transition-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 按钮交互反馈动画 */
+@keyframes button-press {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-button-press {
+  animation: button-press var(--transition-fast) ease-out;
+}
+
+/* 按钮悬停发光效果 */
+@keyframes button-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px var(--accent-glow);
+  }
+}
+
+.animate-glow-pulse {
+  animation: button-glow 2s ease-in-out infinite;
+}
+
+/* 生成按钮悬停效果 */
+.btn-generate {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-generate::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    transparent 50%,
+    transparent 100%
+  );
+  opacity: 0;
+  transition: opacity var(--transition-normal) ease;
+}
+
+.btn-generate:hover::before {
+  opacity: 1;
+}
+
+/* 视角调整平滑动画 */
+.canvas-viewport-transition {
+  transition: transform var(--transition-slow) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 图片预览缩略图悬停效果 */
+@keyframes thumbnail-hover {
+  from {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+  to {
+    transform: scale(1.05);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+}
+
+.thumbnail-hover:hover {
+  animation: thumbnail-hover var(--transition-normal) ease forwards;
+}
+
+/* 删除按钮出现动画 */
+@keyframes delete-btn-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.group:hover .animate-delete-btn {
+  animation: delete-btn-appear var(--transition-fast) ease-out forwards;
+}
+
+/* 进度条动画 */
+@keyframes progress-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 100% 50%;
+  }
+}
+
+.progress-animated {
+  background: linear-gradient(
+    90deg,
+    var(--accent-primary) 0%,
+    var(--accent-secondary) 50%,
+    var(--accent-primary) 100%
+  );
+  background-size: 200% 100%;
+  animation: progress-flow 1.5s ease-in-out infinite;
+}
+
+/* 错误提示抖动动画 */
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+/* 成功提示动画 */
+@keyframes success-pop {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-success {
+  animation: success-pop var(--transition-normal) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 加载旋转动画 - 优化版本 */
+@keyframes spin-smooth {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-smooth {
+  animation: spin-smooth 1s linear infinite;
+}
+
+/* 脉冲动画 - 用于加载状态 */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+/* 滑动条轨道填充动画 */
+.slider-track-animated {
+  transition: background var(--transition-fast) ease;
+}
+
+/* 工具提示动画 */
+@keyframes tooltip-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-tooltip {
+  animation: tooltip-appear var(--transition-fast) ease-out;
+}
+
+
+/* ============================================
+   多选功能样式（需求 3.1, 4.1, 8.1）
+   ============================================ */
+
+/* 选区框样式 */
+.selection-box {
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* 多选状态的图片边框样式 */
+.canvas-image-selected {
+  box-shadow: 
+    0 0 0 2px var(--accent-primary),
+    0 0 0 4px rgba(139, 92, 246, 0.3),
+    0 4px 16px rgba(139, 92, 246, 0.2);
+}
+
+/* 多选状态的图片边框动画 */
+@keyframes selection-pulse {
+  0%, 100% {
+    box-shadow: 
+      0 0 0 2px var(--accent-primary),
+      0 0 0 4px rgba(139, 92, 246, 0.3),
+      0 4px 16px rgba(139, 92, 246, 0.2);
+  }
+  50% {
+    box-shadow: 
+      0 0 0 2px var(--accent-primary),
+      0 0 0 6px rgba(139, 92, 246, 0.2),
+      0 4px 20px rgba(139, 92, 246, 0.3);
+  }
+}
+
+.canvas-image-selected-animated {
+  animation: selection-pulse 2s ease-in-out infinite;
+}
+
+/* 光标样式类 */
+.cursor-move-default {
+  cursor: default;
+}
+
+.cursor-move-hover {
+  cursor: move;
+}
+
+.cursor-hand-default {
+  cursor: grab;
+}
+
+.cursor-hand-dragging {
+  cursor: grabbing;
+}
+
+.cursor-selecting {
+  cursor: crosshair;
+}
+
+/* 框选时禁用图片拖拽 */
+.selecting-mode .canvas-image {
+  pointer-events: none;
+}
+
+/* 多选计数徽章 */
+.selection-count-badge {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: #e4e4e7;
+  z-index: 1000;
+  animation: fade-in 0.2s ease-out;
+}
+
+.selection-count-badge .count {
+  color: var(--accent-primary);
+  font-weight: 600;
 }

@@ -12,16 +12,14 @@ interface ImageUploadProps {
 export const ImageUpload: React.FC<ImageUploadProps> = ({ 
   images, 
   onImagesChange, 
-  maxImages = 14,
+  maxImages = 4,
   disabled = false 
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 生成唯一ID
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
-  // 验证文件
   const validateFile = (file: File): string | null => {
     if (!file.type.startsWith('image/')) {
       return '只支持图片文件';
@@ -33,7 +31,6 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     return null;
   };
 
-  // 将文件转换为Base64
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -43,14 +40,13 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     });
   };
 
-  // 处理文件上传
   const handleFiles = useCallback(async (files: FileList) => {
     setError(null);
     const fileArray = Array.from(files);
     const remainingSlots = maxImages - images.length;
     
     if (fileArray.length > remainingSlots) {
-      setError(`最多只能上传${maxImages}张图片，当前还可以上传${remainingSlots}张`);
+      setError(`最多上传 ${maxImages} 张，还可上传 ${remainingSlots} 张`);
       return;
     }
 
@@ -86,7 +82,6 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     }
   }, [images, maxImages, onImagesChange]);
 
-  // 拖拽处理
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -123,76 +118,73 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     setError(null);
   }, [images, onImagesChange]);
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
   return (
     <div className="space-y-3">
-      {/* 上传区域 */}
-      <div
-        className={`relative border-2 border-dashed rounded-xl p-4 transition-all ${
-          dragActive ? 'border-blue-500 bg-blue-500/10' : 'border-zinc-700 hover:border-zinc-600'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-        onClick={() => !disabled && document.getElementById('file-upload')?.click()}
-      >
-        <input
-          id="file-upload"
-          type="file"
-          multiple
-          accept="image/*"
-          onChange={handleFileSelect}
-          disabled={disabled}
-          className="hidden"
-        />
-        
-        <div className="flex flex-col items-center justify-center py-2">
-          <Upload className={`w-8 h-8 mb-2 ${dragActive ? 'text-blue-500' : 'text-zinc-500'}`} />
-          <p className="text-sm text-zinc-300 text-center mb-1">
-            {dragActive ? '松开鼠标上传图片' : '拖拽图片到此处或点击上传'}
-          </p>
-          <p className="text-xs text-zinc-500 text-center">
-            支持 JPG、PNG、GIF 等格式，最大10MB
-          </p>
-          <p className="text-xs text-zinc-500 text-center mt-1">
-            最多可上传 {maxImages} 张图片 ({images.length}/{maxImages})
-          </p>
-        </div>
-      </div>
-
-      {/* 错误提示 */}
-      {error && (
-        <div className="flex items-center gap-2 p-3 bg-red-950/50 border border-red-900/50 rounded-lg">
-          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-          <span className="text-sm text-red-300">{error}</span>
+      {images.length < maxImages && (
+        <div
+          className={`relative border border-dashed rounded-xl p-4 transition-all cursor-pointer ${
+            dragActive 
+              ? 'border-violet-500 bg-violet-500/10' 
+              : 'border-zinc-700/50 hover:border-zinc-600 hover:bg-zinc-800/30'
+          } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => !disabled && document.getElementById('file-upload')?.click()}
+        >
+          <input
+            id="file-upload"
+            type="file"
+            multiple
+            accept="image/*"
+            onChange={handleFileSelect}
+            disabled={disabled}
+            className="hidden"
+          />
+          
+          <div className="flex flex-col items-center justify-center py-2">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${
+              dragActive ? 'bg-violet-500/20' : 'bg-zinc-800/50'
+            }`}>
+              <Upload className={`w-5 h-5 ${dragActive ? 'text-violet-400' : 'text-zinc-500'}`} />
+            </div>
+            <p className="text-xs text-zinc-400 text-center">
+              {dragActive ? '松开上传' : '拖拽或点击上传'}
+            </p>
+            <p className="text-xs text-zinc-600 text-center mt-1">
+              {images.length}/{maxImages}
+            </p>
+          </div>
         </div>
       )}
 
-      {/* 图片预览网格 */}
+      {error && (
+        <div className="flex items-center gap-2 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+          <span className="text-xs text-red-300">{error}</span>
+        </div>
+      )}
+
       {images.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+        <div className="grid grid-cols-2 gap-2">
           {images.map((image) => (
-            <div key={image.id} className="relative group bg-zinc-900/50 rounded-lg overflow-hidden border border-zinc-800">
-              <img src={image.preview} alt={image.name} className="w-full h-20 object-cover" />
+            <div 
+              key={image.id} 
+              className="relative group rounded-lg overflow-hidden border border-zinc-800/50 bg-zinc-900/50"
+            >
+              <img 
+                src={image.preview} 
+                alt={image.name} 
+                className="w-full h-16 object-cover" 
+              />
               <button
                 onClick={(e) => { e.stopPropagation(); removeImage(image.id); }}
                 disabled={disabled}
-                className="absolute top-1 right-1 w-6 h-6 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-1 right-1 w-5 h-5 bg-black/60 hover:bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
               >
                 <X className="w-3 h-3 text-white" />
               </button>
-              <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-2 py-1">
-                <p className="text-xs text-white truncate">{image.name}</p>
-                <p className="text-xs text-zinc-300">{formatFileSize(image.size)}</p>
-              </div>
             </div>
           ))}
         </div>

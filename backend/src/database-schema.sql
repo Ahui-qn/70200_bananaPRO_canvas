@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS `projects` (
 -- 1. 图片记录表
 CREATE TABLE IF NOT EXISTS `images` (
   `id` VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '图片唯一标识符',
-  `url` TEXT NOT NULL COMMENT '图片访问URL',
+  `url` TEXT COMMENT '图片访问URL（失败时可为空）',
   `original_url` TEXT COMMENT '原始临时URL（OSS上传前）',
   `prompt` TEXT NOT NULL COMMENT '生成提示词',
   `model` VARCHAR(100) NOT NULL COMMENT '使用的AI模型',
@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS `images` (
   `thumbnail_url` TEXT COMMENT '缩略图 URL',
   `width` INT UNSIGNED COMMENT '图片实际宽度（像素）',
   `height` INT UNSIGNED COMMENT '图片实际高度（像素）',
+  `status` ENUM('pending', 'success', 'failed') DEFAULT 'success' COMMENT '图片生成状态',
+  `failure_reason` TEXT COMMENT '失败原因（status为failed时）',
   
   -- 索引
   INDEX `idx_created_at` (`created_at`),
@@ -76,7 +78,8 @@ CREATE TABLE IF NOT EXISTS `images` (
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_project_id` (`project_id`),
   INDEX `idx_oss_uploaded` (`oss_uploaded`),
-  INDEX `idx_is_deleted` (`is_deleted`)
+  INDEX `idx_is_deleted` (`is_deleted`),
+  INDEX `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图片记录表';
 
 -- 为已存在的表添加 width 和 height 字段（迁移脚本）

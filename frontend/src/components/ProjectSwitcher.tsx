@@ -28,7 +28,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   return (
     <div
       className={`
-        relative p-4 rounded-xl cursor-pointer transition-all duration-200
+        relative p-4 rounded-xl cursor-pointer transition-all duration-200 h-full flex flex-col
         ${isActive 
           ? 'bg-purple-500/30 border-2 border-purple-400' 
           : 'bg-white/10 border border-white/20 hover:bg-white/20'
@@ -37,7 +37,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
       onClick={onSelect}
     >
       {/* 封面图片 */}
-      <div className="w-full h-24 rounded-lg bg-gradient-to-br from-purple-500/30 to-pink-500/30 mb-3 overflow-hidden">
+      <div className="w-full h-24 rounded-lg bg-gradient-to-br from-purple-500/30 to-pink-500/30 mb-3 overflow-hidden flex-shrink-0">
         {project.coverImageUrl ? (
           <img 
             src={project.coverImageUrl} 
@@ -53,14 +53,16 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         )}
       </div>
 
-      {/* 项目信息 */}
-      <h3 className="text-white font-medium truncate mb-1">{project.name}</h3>
-      {project.description && (
-        <p className="text-white/60 text-sm truncate mb-2">{project.description}</p>
-      )}
+      {/* 项目信息 - 固定高度区域 */}
+      <div className="flex-1 flex flex-col min-h-[60px]">
+        <h3 className="text-white font-medium truncate mb-1">{project.name}</h3>
+        <p className="text-white/60 text-sm truncate mb-2 h-5">
+          {project.description || '\u00A0'}
+        </p>
+      </div>
       
-      {/* 元信息 */}
-      <div className="flex items-center justify-between text-xs text-white/40">
+      {/* 元信息 - 固定在底部 */}
+      <div className="flex items-center justify-between text-xs text-white/40 mt-auto pt-2">
         <div className="flex items-center gap-1">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -309,9 +311,9 @@ const ProjectSwitcher: React.FC = () => {
                   </button>
 
                   {/* 项目列表 */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 auto-rows-fr">
                     {projects.map(project => (
-                      <div key={project.id} className="group">
+                      <div key={project.id} className="group h-full">
                         <ProjectCard
                           project={project}
                           isActive={project.id === currentProject?.id}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   X,
   TestTube,
@@ -28,6 +29,9 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
   onClose,
   onConfigSaved,
 }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  
   const [config, setConfig] = useState<DatabaseConfigDisplay>({
     host: '',
     port: 3306,
@@ -311,8 +315,9 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleTest}
-                  disabled={testing || loading || connecting}
+                  disabled={testing || loading || connecting || !isAdmin}
                   className="btn-glass flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm text-zinc-300 disabled:opacity-50"
+                  title={!isAdmin ? '仅管理员可操作' : ''}
                 >
                   <TestTube className="w-4 h-4" />
                   {testing ? '测试中...' : '测试连接'}
@@ -321,8 +326,9 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
                 {connectionStatus.isConnected ? (
                   <button
                     onClick={handleDisconnect}
-                    disabled={connecting || loading}
+                    disabled={connecting || loading || !isAdmin}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-xl text-sm transition-colors"
+                    title={!isAdmin ? '仅管理员可操作' : ''}
                   >
                     <WifiOff className="w-4 h-4" />
                     {connecting ? '断开中...' : '断开'}
@@ -330,8 +336,9 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
                 ) : (
                   <button
                     onClick={handleConnect}
-                    disabled={connecting || loading}
+                    disabled={connecting || loading || !isAdmin}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-sm transition-colors"
+                    title={!isAdmin ? '仅管理员可操作' : ''}
                   >
                     <Wifi className="w-4 h-4" />
                     {connecting ? '连接中...' : '连接'}
@@ -342,24 +349,24 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
               {connectionStatus.isConnected && (
                 <button
                   onClick={handleInitDatabase}
-                  disabled={loading || connecting}
+                  disabled={loading || connecting || !isAdmin}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm transition-colors"
+                  title={!isAdmin ? '仅管理员可操作' : ''}
                 >
                   <Database className="w-4 h-4" />
                   {loading ? '初始化中...' : '初始化数据库'}
                 </button>
               )}
+
+              {/* 非管理员提示 */}
+              {!isAdmin && (
+                <p className="text-xs text-zinc-500 text-center flex items-center justify-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  仅管理员可执行数据库操作
+                </p>
+              )}
             </>
           )}
-
-          <div className="flex justify-end">
-            <button
-              onClick={handleClose}
-              className="btn-glass px-4 py-2 rounded-xl text-sm text-zinc-300"
-            >
-              关闭
-            </button>
-          </div>
         </div>
       </div>
     </div>

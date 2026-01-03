@@ -46,23 +46,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       <div className="glass-card rounded-2xl p-8 w-full max-w-md animate-fade-in">
         {/* Logo 和标题 */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg">
-            <svg 
-              className="w-8 h-8 text-white" 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
-            >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={2} 
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" 
-              />
-            </svg>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center shadow-lg shadow-yellow-500/30">
+            <span className="text-4xl">🍌</span>
           </div>
           <h1 className="text-2xl font-semibold text-zinc-100">
-            Nano Banana AI
+            元旦三天怒搓一个🍌PRO
           </h1>
           <p className="text-zinc-400 mt-2">
             登录以继续使用

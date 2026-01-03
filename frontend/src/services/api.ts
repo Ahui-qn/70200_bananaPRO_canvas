@@ -261,6 +261,27 @@ class ApiService {
     });
   }
 
+  /**
+   * 保存失败的图片记录
+   */
+  async saveFailedImage(data: {
+    prompt: string;
+    model: string;
+    aspectRatio: string;
+    imageSize: string;
+    projectId?: string;
+    canvasX?: number;
+    canvasY?: number;
+    width?: number;
+    height?: number;
+    failureReason: string;
+  }): Promise<ApiResponse> {
+    return this.request('/generate/save-failed', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // ========== 测试接口 ==========
   
   async testConnection(data: any = {}): Promise<ApiResponse> {

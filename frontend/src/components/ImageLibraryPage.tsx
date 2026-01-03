@@ -21,6 +21,7 @@ import {
   User,
   Loader2,
   Maximize2,
+  XCircle,
 } from 'lucide-react';
 
 interface ImageLibraryPageProps {
@@ -430,57 +431,92 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
                   ? 'columns-2 sm:columns-3 md:columns-4 lg:columns-6 gap-4' 
                   : 'columns-1 sm:columns-2 md:columns-3 lg:columns-4 gap-4'
               }`}>
-                {images.map((image) => (
+                {images.map((image) => {
+                  // 判断是否为失败状态
+                  const isFailed = image.status === 'failed';
+                  
+                  return (
                   <div
                     key={image.id}
                     className={`image-card relative group cursor-pointer rounded-xl overflow-hidden break-inside-avoid mb-4 ${
                       selectedImage?.id === image.id ? 'ring-2 ring-violet-500' : ''
-                    }`}
+                    } ${isFailed ? 'ring-1 ring-red-500/30' : ''}`}
                     onClick={() => handleSelectImage(image)}
                   >
                     <div className="relative">
-                      <img
-                        src={image.thumbnailUrl || image.url}
-                        alt={image.prompt}
-                        className="w-full object-cover"
-                        style={getImageAspectStyle(image)}
-                        loading="lazy"
-                      />
+                      {isFailed ? (
+                        // 失败状态显示
+                        <div 
+                          className="w-full flex flex-col items-center justify-center gap-3 bg-zinc-900/80 border border-red-500/20"
+                          style={getImageAspectStyle(image)}
+                        >
+                          <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                            <X className="w-6 h-6 text-red-400" />
+                          </div>
+                          <div className="text-center px-4">
+                            <p className="text-sm text-red-400 mb-1">生成失败</p>
+                            <p className="text-xs text-zinc-500 mb-2">{image.failureReason || '未知错误'}</p>
+                          </div>
+                          <p className="text-xs text-zinc-500 max-w-[90%] truncate px-4">{image.prompt}</p>
+                          <div className="text-xs text-zinc-600 mt-1">
+                            {image.model} · {image.aspectRatio} · {image.imageSize}
+                          </div>
+                        </div>
+                      ) : (
+                        // 正常图片显示
+                        <img
+                          src={image.thumbnailUrl || image.url}
+                          alt={image.prompt}
+                          className="w-full object-cover"
+                          style={getImageAspectStyle(image)}
+                          loading="lazy"
+                        />
+                      )}
                       
-                      {/* 尺寸标签 - 左上角 */}
-                      <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/70 text-white text-xs rounded border border-white/20 backdrop-blur-sm">
-                        {getImageSizeText(image)}
-                      </div>
+                      {/* 尺寸标签 - 左上角（仅正常图片显示） */}
+                      {!isFailed && (
+                        <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/70 text-white text-xs rounded border border-white/20 backdrop-blur-sm">
+                          {getImageSizeText(image)}
+                        </div>
+                      )}
                       
-                      {/* 悬浮遮罩 */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      {/* 悬浮遮罩（仅正常图片显示） */}
+                      {!isFailed && (
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      )}
                       
                       {/* 悬浮操作按钮 */}
                       <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {/* 放大预览按钮 */}
-                        <button
-                          onClick={(e) => handlePreviewImage(image, e)}
-                          className="p-2 bg-black/40 text-white rounded-lg backdrop-blur-sm hover:bg-violet-500/80 transition-colors"
-                          title="放大预览"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={(e) => handleToggleFavorite(image, e)}
-                          className={`p-2 rounded-lg backdrop-blur-sm transition-colors ${
-                            image.favorite
-                              ? 'bg-red-500/80 text-white'
-                              : 'bg-black/40 text-white hover:bg-black/60'
-                          }`}
-                        >
-                          <Heart className="w-3.5 h-3.5" fill={image.favorite ? 'currentColor' : 'none'} />
-                        </button>
-                        <button
-                          onClick={(e) => handleDownload(image, e)}
-                          className="p-2 bg-black/40 text-white rounded-lg backdrop-blur-sm hover:bg-black/60 transition-colors"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
+                        {/* 放大预览按钮（仅正常图片显示） */}
+                        {!isFailed && (
+                          <button
+                            onClick={(e) => handlePreviewImage(image, e)}
+                            className="p-2 bg-black/40 text-white rounded-lg backdrop-blur-sm hover:bg-violet-500/80 transition-colors"
+                            title="放大预览"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {!isFailed && (
+                          <button
+                            onClick={(e) => handleToggleFavorite(image, e)}
+                            className={`p-2 rounded-lg backdrop-blur-sm transition-colors ${
+                              image.favorite
+                                ? 'bg-red-500/80 text-white'
+                                : 'bg-black/40 text-white hover:bg-black/60'
+                            }`}
+                          >
+                            <Heart className="w-3.5 h-3.5" fill={image.favorite ? 'currentColor' : 'none'} />
+                          </button>
+                        )}
+                        {!isFailed && (
+                          <button
+                            onClick={(e) => handleDownload(image, e)}
+                            className="p-2 bg-black/40 text-white rounded-lg backdrop-blur-sm hover:bg-black/60 transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -492,25 +528,28 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
                         </button>
                       </div>
 
-                      {/* 收藏标记 */}
-                      {image.favorite && !selectedImage && (
+                      {/* 收藏标记（仅正常图片显示） */}
+                      {!isFailed && image.favorite && !selectedImage && (
                         <div className="absolute top-10 left-2">
                           <Heart className="w-4 h-4 text-red-500 drop-shadow-lg" fill="currentColor" />
                         </div>
                       )}
 
-                      {/* 底部信息 */}
-                      <div className="absolute bottom-0 left-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <p className="text-xs text-white/80 line-clamp-2">{image.prompt}</p>
-                        <div className="flex items-center gap-2 mt-1.5 text-xs text-white/60">
-                          <span>{image.model}</span>
-                          <span>•</span>
-                          <span>{formatRelativeDate(image.createdAt)}</span>
+                      {/* 底部信息（仅正常图片显示） */}
+                      {!isFailed && (
+                        <div className="absolute bottom-0 left-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <p className="text-xs text-white/80 line-clamp-2">{image.prompt}</p>
+                          <div className="flex items-center gap-2 mt-1.5 text-xs text-white/60">
+                            <span>{image.model}</span>
+                            <span>•</span>
+                            <span>{formatRelativeDate(image.createdAt)}</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* 无限滚动加载更多 */}
@@ -539,11 +578,24 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
             <div className="space-y-6">
               {/* 图片预览 */}
               <div className="relative rounded-xl overflow-hidden">
-                <img
-                  src={selectedImage.url}
-                  alt={selectedImage.prompt}
-                  className="w-full rounded-xl"
-                />
+                {selectedImage.status === 'failed' ? (
+                  // 失败状态显示
+                  <div className="w-full aspect-video flex flex-col items-center justify-center gap-3 bg-zinc-900/80 border border-red-500/20 rounded-xl">
+                    <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
+                      <X className="w-8 h-8 text-red-400" />
+                    </div>
+                    <div className="text-center px-4">
+                      <p className="text-base text-red-400 mb-1">生成失败</p>
+                      <p className="text-sm text-zinc-500">{selectedImage.failureReason || '未知错误'}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <img
+                    src={selectedImage.url}
+                    alt={selectedImage.prompt}
+                    className="w-full rounded-xl"
+                  />
+                )}
                 <button
                   onClick={() => setSelectedImage(null)}
                   className="absolute top-2 right-2 p-2 bg-black/50 rounded-lg backdrop-blur-sm hover:bg-black/70 transition-colors"
@@ -644,27 +696,31 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
 
               {/* 操作按钮 */}
               <div className="flex gap-2">
-                <button
-                  onClick={() => handleToggleFavorite(selectedImage)}
-                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
-                    selectedImage.favorite
-                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                      : 'btn-glass text-zinc-300'
-                  }`}
-                >
-                  <Heart className="w-4 h-4" fill={selectedImage.favorite ? 'currentColor' : 'none'} />
-                  {selectedImage.favorite ? '已收藏' : '收藏'}
-                </button>
-                <button
-                  onClick={() => handleDownload(selectedImage)}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 btn-glass rounded-xl text-sm font-medium text-zinc-300"
-                >
-                  <Download className="w-4 h-4" />
-                  下载
-                </button>
+                {selectedImage.status !== 'failed' && (
+                  <>
+                    <button
+                      onClick={() => handleToggleFavorite(selectedImage)}
+                      className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
+                        selectedImage.favorite
+                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          : 'btn-glass text-zinc-300'
+                      }`}
+                    >
+                      <Heart className="w-4 h-4" fill={selectedImage.favorite ? 'currentColor' : 'none'} />
+                      {selectedImage.favorite ? '已收藏' : '收藏'}
+                    </button>
+                    <button
+                      onClick={() => handleDownload(selectedImage)}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 btn-glass rounded-xl text-sm font-medium text-zinc-300"
+                    >
+                      <Download className="w-4 h-4" />
+                      下载
+                    </button>
+                  </>
+                )}
               </div>
 
-              {onSelectImage && (
+              {onSelectImage && selectedImage.status !== 'failed' && (
                 <button
                   onClick={() => {
                     onSelectImage(selectedImage.url);

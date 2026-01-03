@@ -79,6 +79,9 @@ export interface OSSConfig {
   enabled: boolean;
 }
 
+// 图片生成状态
+export type ImageStatus = 'pending' | 'success' | 'failed';
+
 // 保存的图片
 export interface SavedImage {
   id: string;
@@ -106,6 +109,8 @@ export interface SavedImage {
   thumbnailUrl?: string;     // 缩略图 URL
   width?: number;            // 图片宽度
   height?: number;           // 图片高度
+  status?: ImageStatus;      // 图片生成状态
+  failureReason?: string;    // 失败原因（status为failed时）
 }
 
 // 图片结果
@@ -381,4 +386,5 @@ export interface CanvasImage extends SavedImage {
   isVisible?: boolean;           // 是否在视口内
   x?: number;                    // 运行时 X 坐标（与 canvasX 同步）
   y?: number;                    // 运行时 Y 坐标（与 canvasY 同步）
+  isFailed?: boolean;            // 是否生成失败（运行时状态，与 status 同步）
 }
