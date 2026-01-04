@@ -2276,3 +2276,484 @@ describe('图片位置计算属性测试', () => {
     });
   });
 });
+
+
+// ============================================
+// 添加为参考图功能属性测试
+// ============================================
+
+// 模拟 UploadedImage 类型
+interface MockUploadedImage {
+  id: string;
+  preview: string;
+  name: string;
+  size: number;
+}
+
+// 模拟添加为参考图的画布图片类型
+interface AddRefCanvasImage {
+  id: string;
+  url: string;
+  thumbnailUrl?: string;
+  prompt: string;
+}
+
+// 参考图最大数量
+const MAX_REF_IMAGES = 4;
+
+/**
+ * 模拟添加为参考图的核心逻辑
+ * 返回 { success, result, error }
+ */
+function addAsReferenceImage(
+  image: AddRefCanvasImage,
+  currentRefImages: MockUploadedImage[]
+): { success: boolean; result?: MockUploadedImage[]; error?: string } {
+  // 检查参考图数量是否达到上限
+  if (currentRefImages.length >= MAX_REF_IMAGES) {
+    return { success: false, error: 'max_limit' };
+  }
+
+  // 检查图片 URL 是否有效
+  if (!image.url) {
+    return { success: false, error: 'invalid_url' };
+  }
+
+  // 检查图片是否已存在于参考图列表
+  const isDuplicate = currentRefImages.some(
+    (refImg) => refImg.preview === image.url || refImg.preview === image.thumbnailUrl
+  );
+  if (isDuplicate) {
+    return { success: false, error: 'duplicate' };
+  }
+
+  // 创建新的参考图对象
+  const newRefImage: MockUploadedImage = {
+    id: `ref-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    preview: image.url,
+    name: `画布图片-${currentRefImages.length + 1}`,
+    size: 0,
+  };
+
+  // 返回更新后的列表
+  return {
+    success: true,
+    result: [...currentRefImages, newRefImage],
+  };
+}
+
+// 生成器
+const canvasImageIdArb = fc.string({ minLength: 5, maxLength: 20 }).map(s => `img-${s.replace(/[^a-zA-Z0-9]/g, '')}`);
+const imageUrlArb = fc.webUrl();
+const promptArb = fc.string({ minLength: 0, maxLength: 200 });
+
+// 生成有效的画布图片
+const validCanvasImageArb: fc.Arbitrary<AddRefCanvasImage> = fc.record({
+  id: canvasImageIdArb,
+  url: imageUrlArb,
+  thumbnailUrl: fc.option(imageUrlArb, { nil: undefined }),
+  prompt: promptArb,
+});
+
+// 生成无效的画布图片（无 URL）
+const invalidCanvasImageArb: fc.Arbitrary<AddRefCanvasImage> = fc.record({
+  id: canvasImageIdArb,
+  url: fc.constant(''),
+  thumbnailUrl: fc.option(imageUrlArb, { nil: undefined }),
+  prompt: promptArb,
+});
+
+// 生成参考图对象
+const uploadedImageArb: fc.Arbitrary<MockUploadedImage> = fc.record({
+  id: fc.string({ minLength: 5, maxLength: 30 }).map(s => `ref-${s.replace(/[^a-zA-Z0-9]/g, '')}`),
+  preview: imageUrlArb,
+  name: fc.string({ minLength: 1, maxLength: 50 }),
+  size: fc.integer({ min: 0, max: 10000000 }),
+});
+
+// 生成参考图列表（确保 ID 和 preview 唯一）
+const addRefImageListArb = (minLength: number, maxLength: number): fc.Arbitrary<MockUploadedImage[]> => {
+  return fc.array(uploadedImageArb, { minLength, maxLength }).map(images => {
+    const seenIds = new Set<string>();
+    const seenPreviews = new Set<string>();
+    return images.filter(img => {
+      if (seenIds.has(img.id) || seenPreviews.has(img.preview)) return false;
+      seenIds.add(img.id);
+      seenPreviews.add(img.preview);
+      return true;
+    });
+  });
+};
+
+describe('CanvasDialogBar - 添加为参考图属性测试', () => {
+  /**
+   * **Feature: add-as-reference-image, Property 2: 添加参考图格式正确性**
+   * **Validates: Requirements 2.1**
+   * 
+   * 对于任意包含有效 URL 的画布图片，调用添加为参考图函数后，
+   * 参考图列表中应包含一个新的 UploadedImage 对象，其 preview 字段等于图片的 URL。
+   */
+  describe('Property 2: 添加参考图格式正确性', () => {
+    it('有效图片应被正确转换为参考图格式', () => {
+      fc.assert(
+        fc.property(
+          validCanvasImageArb,
+          addRefImageListArb(0, MAX_REF_IMAGES - 1),
+          (image, currentRefImages) => {
+            // 前置条件：当前参考图数量未达上限
+            fc.pre(currentRefImages.length < MAX_REF_IMAGES);
+            // 前置条件：图片 URL 不在现有参考图中
+            fc.pre(!currentRefImages.some(ref => ref.preview === image.url));
+
+            const result = addAsReferenceImage(image, currentRefImages);
+
+            // 验证：添加成功
+            expect(result.success).toBe(true);
+            expect(result.result).toBeDefined();
+
+            if (result.result) {
+              // 验证：列表长度增加 1
+              expect(result.result.length).toBe(currentRefImages.length + 1);
+
+              // 验证：新添加的参考图 preview 等于图片 URL
+              const newRefImage = result.result[result.result.length - 1];
+              expect(newRefImage.preview).toBe(image.url);
+
+              // 验证：新参考图有有效的 ID
+              expect(newRefImage.id).toBeTruthy();
+              expect(newRefImage.id.startsWith('ref-canvas-')).toBe(true);
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('无效图片（无 URL）应被拒绝', () => {
+      fc.assert(
+        fc.property(
+          invalidCanvasImageArb,
+          addRefImageListArb(0, MAX_REF_IMAGES - 1),
+          (image, currentRefImages) => {
+            const result = addAsReferenceImage(image, currentRefImages);
+
+            // 验证：添加失败
+            expect(result.success).toBe(false);
+            expect(result.error).toBe('invalid_url');
+
+            // 验证：列表未改变
+            expect(result.result).toBeUndefined();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('达到上限时应拒绝添加', () => {
+      fc.assert(
+        fc.property(
+          validCanvasImageArb,
+          addRefImageListArb(MAX_REF_IMAGES, MAX_REF_IMAGES),
+          (image, currentRefImages) => {
+            // 前置条件：当前参考图数量已达上限
+            fc.pre(currentRefImages.length >= MAX_REF_IMAGES);
+
+            const result = addAsReferenceImage(image, currentRefImages);
+
+            // 验证：添加失败
+            expect(result.success).toBe(false);
+            expect(result.error).toBe('max_limit');
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: add-as-reference-image, Property 3: 重复图片检测**
+   * **Validates: Requirements 3.3**
+   * 
+   * 对于任意已存在于参考图列表中的图片 URL，再次调用添加为参考图函数
+   * 应返回重复标识，且参考图列表长度不变。
+   */
+  describe('Property 3: 重复图片检测', () => {
+    it('重复图片应被检测并拒绝', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(1, MAX_REF_IMAGES - 1),
+          (currentRefImages) => {
+            // 前置条件：列表非空
+            fc.pre(currentRefImages.length > 0);
+
+            // 选择一个已存在的参考图 URL
+            const existingRefImage = currentRefImages[0];
+            const duplicateImage: AddRefCanvasImage = {
+              id: 'duplicate-test',
+              url: existingRefImage.preview,
+              prompt: 'test',
+            };
+
+            const result = addAsReferenceImage(duplicateImage, currentRefImages);
+
+            // 验证：添加失败，原因是重复
+            expect(result.success).toBe(false);
+            expect(result.error).toBe('duplicate');
+
+            // 验证：列表未改变
+            expect(result.result).toBeUndefined();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('非重复图片应被成功添加', () => {
+      fc.assert(
+        fc.property(
+          validCanvasImageArb,
+          addRefImageListArb(0, MAX_REF_IMAGES - 1),
+          (image, currentRefImages) => {
+            // 前置条件：图片 URL 不在现有参考图中
+            fc.pre(!currentRefImages.some(ref => ref.preview === image.url));
+            // 前置条件：当前参考图数量未达上限
+            fc.pre(currentRefImages.length < MAX_REF_IMAGES);
+
+            const result = addAsReferenceImage(image, currentRefImages);
+
+            // 验证：添加成功
+            expect(result.success).toBe(true);
+            expect(result.result).toBeDefined();
+
+            if (result.result) {
+              // 验证：列表长度增加 1
+              expect(result.result.length).toBe(currentRefImages.length + 1);
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('连续添加相同图片应只成功一次', () => {
+      fc.assert(
+        fc.property(
+          validCanvasImageArb,
+          (image) => {
+            const emptyList: MockUploadedImage[] = [];
+
+            // 第一次添加
+            const firstResult = addAsReferenceImage(image, emptyList);
+            expect(firstResult.success).toBe(true);
+
+            if (firstResult.result) {
+              // 第二次添加相同图片
+              const secondResult = addAsReferenceImage(image, firstResult.result);
+
+              // 验证：第二次添加失败
+              expect(secondResult.success).toBe(false);
+              expect(secondResult.error).toBe('duplicate');
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+// ============================================
+// 参考图拖拽排序属性测试
+// ============================================
+
+/**
+ * 模拟拖拽排序的核心逻辑
+ * 将元素从 fromIndex 移动到 toIndex
+ */
+function reorderRefImages<T>(
+  images: T[],
+  fromIndex: number,
+  toIndex: number
+): T[] {
+  if (fromIndex < 0 || fromIndex >= images.length) return images;
+  if (toIndex < 0 || toIndex >= images.length) return images;
+  if (fromIndex === toIndex) return images;
+
+  const newImages = [...images];
+  const [draggedItem] = newImages.splice(fromIndex, 1);
+  newImages.splice(toIndex, 0, draggedItem);
+  return newImages;
+}
+
+describe('CanvasDialogBar - 参考图拖拽排序属性测试', () => {
+  /**
+   * **Feature: add-as-reference-image, Property 4: 拖拽排序保持元素**
+   * **Validates: Requirements 4.2**
+   * 
+   * 对于任意参考图列表和有效的拖拽操作（从索引 A 移动到索引 B），
+   * 排序后的列表应包含与原列表相同的所有元素，仅顺序不同。
+   */
+  describe('Property 4: 拖拽排序保持元素', () => {
+    it('拖拽排序应保持所有元素', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(2, MAX_REF_IMAGES),
+          (images) => {
+            // 前置条件：至少有 2 个元素
+            fc.pre(images.length >= 2);
+
+            // 生成有效的拖拽索引
+            const fromIndex = Math.floor(Math.random() * images.length);
+            let toIndex = Math.floor(Math.random() * images.length);
+            while (toIndex === fromIndex && images.length > 1) {
+              toIndex = Math.floor(Math.random() * images.length);
+            }
+
+            const reorderedImages = reorderRefImages(images, fromIndex, toIndex);
+
+            // 验证：列表长度不变
+            expect(reorderedImages.length).toBe(images.length);
+
+            // 验证：所有原始元素都存在于新列表中
+            for (const img of images) {
+              expect(reorderedImages.find(i => i.id === img.id)).toBeDefined();
+            }
+
+            // 验证：新列表中的所有元素都来自原列表
+            for (const img of reorderedImages) {
+              expect(images.find(i => i.id === img.id)).toBeDefined();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('无效索引应保持列表不变', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(1, MAX_REF_IMAGES),
+          fc.integer({ min: -10, max: -1 }),
+          (images, invalidIndex) => {
+            const originalLength = images.length;
+            const reorderedImages = reorderRefImages(images, invalidIndex, 0);
+
+            // 验证：列表不变
+            expect(reorderedImages.length).toBe(originalLength);
+            expect(reorderedImages).toEqual(images);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('相同索引应保持列表不变', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(1, MAX_REF_IMAGES),
+          (images) => {
+            fc.pre(images.length > 0);
+
+            const index = Math.floor(Math.random() * images.length);
+            const reorderedImages = reorderRefImages(images, index, index);
+
+            // 验证：列表不变
+            expect(reorderedImages).toEqual(images);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: add-as-reference-image, Property 5: 拖拽排序位置正确性**
+   * **Validates: Requirements 4.2**
+   * 
+   * 对于任意参考图列表和有效的拖拽操作（从索引 A 移动到索引 B），
+   * 被拖拽的元素应出现在目标位置 B。
+   */
+  describe('Property 5: 拖拽排序位置正确性', () => {
+    it('被拖拽元素应出现在目标位置', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(2, MAX_REF_IMAGES),
+          (images) => {
+            // 前置条件：至少有 2 个元素
+            fc.pre(images.length >= 2);
+
+            // 生成有效的拖拽索引
+            const fromIndex = Math.floor(Math.random() * images.length);
+            let toIndex = Math.floor(Math.random() * images.length);
+            while (toIndex === fromIndex && images.length > 1) {
+              toIndex = Math.floor(Math.random() * images.length);
+            }
+
+            const draggedElement = images[fromIndex];
+            const reorderedImages = reorderRefImages(images, fromIndex, toIndex);
+
+            // 验证：被拖拽元素出现在目标位置
+            expect(reorderedImages[toIndex].id).toBe(draggedElement.id);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('向前拖拽应正确移动元素', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(3, MAX_REF_IMAGES),
+          (images) => {
+            // 前置条件：至少有 3 个元素
+            fc.pre(images.length >= 3);
+
+            // 从后面拖到前面
+            const fromIndex = images.length - 1;
+            const toIndex = 0;
+
+            const draggedElement = images[fromIndex];
+            const reorderedImages = reorderRefImages(images, fromIndex, toIndex);
+
+            // 验证：被拖拽元素出现在第一个位置
+            expect(reorderedImages[0].id).toBe(draggedElement.id);
+
+            // 验证：其他元素顺序正确
+            for (let i = 0; i < images.length - 1; i++) {
+              expect(reorderedImages[i + 1].id).toBe(images[i].id);
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('向后拖拽应正确移动元素', () => {
+      fc.assert(
+        fc.property(
+          addRefImageListArb(3, MAX_REF_IMAGES),
+          (images) => {
+            // 前置条件：至少有 3 个元素
+            fc.pre(images.length >= 3);
+
+            // 从前面拖到后面
+            const fromIndex = 0;
+            const toIndex = images.length - 1;
+
+            const draggedElement = images[fromIndex];
+            const reorderedImages = reorderRefImages(images, fromIndex, toIndex);
+
+            // 验证：被拖拽元素出现在最后一个位置
+            expect(reorderedImages[toIndex].id).toBe(draggedElement.id);
+
+            // 验证：其他元素顺序正确
+            for (let i = 1; i < images.length; i++) {
+              expect(reorderedImages[i - 1].id).toBe(images[i].id);
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});

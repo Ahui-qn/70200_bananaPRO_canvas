@@ -17,6 +17,8 @@ import {
   Share2,
   X,
   Loader2,
+  RefreshCw,
+  ImagePlus,
 } from 'lucide-react';
 
 // 默认图片尺寸（当数据库中没有尺寸数据时使用）
@@ -44,6 +46,10 @@ interface CanvasImageLayerProps {
   onDownloadImage?: (image: CanvasImage) => void;
   // 分享图片
   onShareImage?: (image: CanvasImage) => void;
+  // 重新生成图片（将图片参数填充到生成对话框）
+  onRegenerateImage?: (image: CanvasImage) => void;
+  // 添加为参考图
+  onAddAsReferenceImage?: (image: CanvasImage) => void;
 }
 
 /**
@@ -108,6 +114,8 @@ const CanvasImageItem: React.FC<{
   onFavorite?: () => void;
   onDownload?: () => void;
   onShare?: () => void;
+  onRegenerate?: () => void;  // 重新生成回调
+  onAddAsReference?: () => void;  // 添加为参考图回调
 }> = ({
   image,
   isSelected,
@@ -118,6 +126,8 @@ const CanvasImageItem: React.FC<{
   onFavorite,
   onDownload,
   onShare,
+  onRegenerate,
+  onAddAsReference,
 }) => {
   // 优先使用运行时位置（x），因为它可能被用户拖动更新
   const imgX = image.x ?? image.canvasX ?? 0;
@@ -271,16 +281,31 @@ const CanvasImageItem: React.FC<{
           <div className="text-xs text-zinc-600 mt-1">
             {image.model} · {image.aspectRatio} · {image.imageSize}
           </div>
-          {/* 删除按钮 */}
-          <button
-            className="absolute top-2 right-2 btn-glass p-2 rounded-lg hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            <X className="w-3.5 h-3.5 text-zinc-300" />
-          </button>
+          {/* 操作按钮 - 失败状态下显示重新生成和删除按钮 */}
+          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {onRegenerate && (
+              <button
+                className="btn-glass p-2 rounded-lg hover:bg-violet-500/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRegenerate();
+                }}
+                title="重新生成"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-violet-400" />
+              </button>
+            )}
+            <button
+              className="btn-glass p-2 rounded-lg hover:bg-red-500/20"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              title="删除"
+            >
+              <X className="w-3.5 h-3.5 text-zinc-300" />
+            </button>
+          </div>
         </div>
       ) : isGenerating ? (
         // 占位符 - 正在生成中
@@ -332,6 +357,31 @@ const CanvasImageItem: React.FC<{
           
           {/* 操作按钮 */}
           <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* 添加为参考图按钮 - 位于最左侧 */}
+            {onAddAsReference && (
+              <button
+                className="btn-glass p-2 rounded-lg hover:bg-emerald-500/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddAsReference();
+                }}
+                title="添加为参考图"
+              >
+                <ImagePlus className="w-3.5 h-3.5 text-emerald-400" />
+              </button>
+            )}
+            {onRegenerate && (
+              <button
+                className="btn-glass p-2 rounded-lg hover:bg-violet-500/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRegenerate();
+                }}
+                title="重新生成"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-violet-400" />
+              </button>
+            )}
             {onFavorite && (
               <button
                 className="btn-glass p-2 rounded-lg"
@@ -339,6 +389,7 @@ const CanvasImageItem: React.FC<{
                   e.stopPropagation();
                   onFavorite();
                 }}
+                title="收藏"
               >
                 <Heart
                   className={`w-3.5 h-3.5 ${
@@ -354,6 +405,7 @@ const CanvasImageItem: React.FC<{
                   e.stopPropagation();
                   onDownload();
                 }}
+                title="下载"
               >
                 <Download className="w-3.5 h-3.5 text-zinc-300" />
               </button>
@@ -365,6 +417,7 @@ const CanvasImageItem: React.FC<{
                   e.stopPropagation();
                   onShare();
                 }}
+                title="分享"
               >
                 <Share2 className="w-3.5 h-3.5 text-zinc-300" />
               </button>
@@ -375,6 +428,7 @@ const CanvasImageItem: React.FC<{
                 e.stopPropagation();
                 onDelete();
               }}
+              title="删除"
             >
               <X className="w-3.5 h-3.5 text-zinc-300" />
             </button>
@@ -470,6 +524,8 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
   onFavoriteImage,
   onDownloadImage,
   onShareImage,
+  onRegenerateImage,
+  onAddAsReferenceImage,
 }) => {
   // 当前缩放比例
   const scale = viewport.scale;
@@ -553,6 +609,8 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
           onFavorite={onFavoriteImage ? () => onFavoriteImage(img.id) : undefined}
           onDownload={() => handleDownload(img)}
           onShare={() => handleShare(img)}
+          onRegenerate={onRegenerateImage ? () => onRegenerateImage(img) : undefined}
+          onAddAsReference={onAddAsReferenceImage ? () => onAddAsReferenceImage(img) : undefined}
         />
       ))}
     </>

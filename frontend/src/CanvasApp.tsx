@@ -177,6 +177,11 @@ function CanvasApp() {
   const [generationStatus, setGenerationStatus] = useState('');
   const [generationError, setGenerationError] = useState<string | null>(null);
 
+  // Toast 提示状态（用于重新生成等操作反馈）
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info' | 'warning'>('info');
+
   // 使用多选功能 Hook（需求 1.1-1.4, 2.1-2.4, 3.1-3.5, 4.1-4.4, 5.1-5.4, 6.1-6.4, 7.1-7.3）
   const {
     toolMode,
@@ -400,6 +405,153 @@ function CanvasApp() {
   }, [loadProjectImages]);
 
   /**
+   * 重新生成图片 - 将图片参数填充到生成对话框
+   * 需求: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 4.1, 4.2, 4.3
+   */
+  const handleRegenerateImage = useCallback(async (image: CanvasImageType) => {
+    // 检查是否正在生成中（需求 4.1）
+    if (isGenerating) {
+      setToastMessage('请等待当前生成完成');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+
+    try {
+      // 提取图片参数并更新设置（需求 2.1, 2.2, 2.3, 2.4, 4.3）
+      const newSettings: GenerationSettings = {
+        ...settings,
+        prompt: image.prompt || '',
+        model: image.model || DEFAULT_SETTINGS.model,
+        aspectRatio: image.aspectRatio || DEFAULT_SETTINGS.aspectRatio,
+        imageSize: image.imageSize || DEFAULT_SETTINGS.imageSize,
+        refImageUrl: '',
+        refImages: [], // 先清空，后面尝试恢复
+      };
+
+      // 尝试恢复参考图（需求 2.5）
+      if (image.refImages && image.refImages.length > 0) {
+        const restoredRefImages: UploadedImage[] = [];
+        let hasFailedImages = false;
+
+        for (const refImg of image.refImages) {
+          const refUrl = (refImg as any).url || (refImg as any).preview || '';
+          const refId = (refImg as any).id || `ref_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+          
+          if (refUrl) {
+            // 创建简化的 UploadedImage 对象（无法完全恢复原始文件信息）
+            restoredRefImages.push({
+              id: refId,
+              file: new File([], 'restored-image.jpg'), // 空文件占位
+              base64: refUrl.startsWith('data:') ? refUrl : undefined,
+              preview: refUrl,
+              name: `参考图-${restoredRefImages.length + 1}`,
+              size: 0,
+            });
+          } else {
+            hasFailedImages = true;
+          }
+        }
+
+        if (restoredRefImages.length > 0) {
+          newSettings.refImages = restoredRefImages;
+        }
+
+        // 如果有参考图恢复失败，显示提示（需求 3.3）
+        if (hasFailedImages) {
+          setToastMessage('部分参考图无法恢复');
+          setToastType('warning');
+          setShowToast(true);
+        }
+      }
+
+      // 更新设置状态
+      setSettings(newSettings);
+
+      // 显示成功提示（需求 3.2）
+      if (!image.refImages || image.refImages.length === 0 || 
+          (image.refImages.length > 0 && newSettings.refImages.length > 0)) {
+        setToastMessage('参数已填充，可以开始生成');
+        setToastType('success');
+        setShowToast(true);
+      }
+
+      // 聚焦到生成对话框（需求 3.1）
+      // 通过设置一个标志让 CanvasDialogBar 获得焦点
+      setTimeout(() => {
+        const textarea = document.querySelector('.dialog-container textarea') as HTMLTextAreaElement;
+        if (textarea) {
+          textarea.focus();
+          // 将光标移到文本末尾
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+      }, 100);
+
+    } catch (error) {
+      console.error('重新生成参数填充失败:', error);
+      setToastMessage('参数填充失败，请重试');
+      setToastType('error');
+      setShowToast(true);
+    }
+  }, [isGenerating, settings]);
+
+  /**
+   * 添加为参考图 - 将画布图片添加到参考图列表
+   * 需求: 1.1, 2.1, 2.3, 3.1, 3.2, 3.3
+   */
+  const handleAddAsReferenceImage = useCallback((image: CanvasImageType) => {
+    // 参考图最大数量限制
+    const MAX_REF_IMAGES = 4;
+    const currentRefImages = settings.refImages || [];
+
+    // 检查参考图数量是否达到上限（需求 2.3）
+    if (currentRefImages.length >= MAX_REF_IMAGES) {
+      setToastMessage(`参考图数量已达上限（最多 ${MAX_REF_IMAGES} 张）`);
+      setToastType('warning');
+      setShowToast(true);
+      return;
+    }
+
+    // 检查图片 URL 是否有效
+    if (!image.url) {
+      setToastMessage('无法添加该图片');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    // 检查图片是否已存在于参考图列表（需求 3.3）
+    const isDuplicate = currentRefImages.some(
+      (refImg) => refImg.preview === image.url || refImg.preview === image.thumbnailUrl
+    );
+    if (isDuplicate) {
+      setToastMessage('该图片已添加为参考图');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+
+    // 将图片 URL 转换为 UploadedImage 格式（需求 2.1）
+    const newRefImage: UploadedImage = {
+      id: `ref-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      file: new File([], 'canvas-image.jpg'), // 空文件占位
+      base64: undefined,
+      preview: image.url, // 使用图片 URL 作为预览
+      name: `画布图片-${currentRefImages.length + 1}`,
+      size: 0,
+    };
+
+    // 添加到参考图列表
+    const updatedRefImages = [...currentRefImages, newRefImage];
+    setSettings((prev) => ({ ...prev, refImages: updatedRefImages }));
+
+    // 显示成功提示（需求 3.1）
+    setToastMessage('已添加为参考图');
+    setToastType('success');
+    setShowToast(true);
+  }, [settings.refImages]);
+
+  /**
    * 双击放大图片到视口 80%（需求 6.1, 6.2, 6.3, 6.4）
    * 如果已经放大，则恢复到之前的视口状态
    */
@@ -567,6 +719,16 @@ function CanvasApp() {
     initializeApp();
   }, []);
 
+  // Toast 自动消失逻辑
+  useEffect(() => {
+    if (showToast) {
+      const timer = setTimeout(() => {
+        setShowToast(false);
+      }, 2000); // 2秒后自动消失
+      return () => clearTimeout(timer);
+    }
+  }, [showToast]);
+
   // 滚轮缩放 - 以鼠标位置为中心缩放
   useEffect(() => {
     const canvasElement = canvasRef.current;
@@ -660,9 +822,89 @@ function CanvasApp() {
     setSettings(prev => ({ ...prev, refImages: images }));
   };
 
-  const handleResetView = useCallback(() => {
-    setScale(1);
-    setPosition({ x: 0, y: 0 });
+  // 适应所有图片 - 计算能看到所有图片的缩放和位置
+  const handleFitAllImages = useCallback(() => {
+    if (persistedImages.length === 0) {
+      // 没有图片时重置到默认视图
+      setScale(1);
+      setPosition({ x: 0, y: 0 });
+      return;
+    }
+
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) return;
+
+    const rect = canvasElement.getBoundingClientRect();
+    const viewportWidth = rect.width;
+    const viewportHeight = rect.height;
+
+    // 计算所有图片的边界框
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    
+    for (const img of persistedImages) {
+      const imgX = img.x ?? img.canvasX ?? 0;
+      const imgY = img.y ?? img.canvasY ?? 0;
+      const imgWidth = img.width || 400;
+      const imgHeight = img.height || 400;
+      
+      minX = Math.min(minX, imgX);
+      minY = Math.min(minY, imgY);
+      maxX = Math.max(maxX, imgX + imgWidth);
+      maxY = Math.max(maxY, imgY + imgHeight);
+    }
+
+    // 计算内容的宽高
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+
+    // 添加边距（10%）
+    const padding = 0.1;
+    const paddedWidth = contentWidth * (1 + padding * 2);
+    const paddedHeight = contentHeight * (1 + padding * 2);
+
+    // 计算适应视口的缩放比例
+    const scaleX = viewportWidth / paddedWidth;
+    const scaleY = viewportHeight / paddedHeight;
+    const targetScale = Math.min(scaleX, scaleY, 1); // 最大不超过 1
+
+    // 计算内容中心
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+
+    // 计算将内容居中显示的位置
+    const targetX = viewportWidth / 2 - contentCenterX * targetScale;
+    const targetY = viewportHeight / 2 - contentCenterY * targetScale;
+
+    // 直接设置最终值，避免动画卡顿
+    setScale(targetScale);
+    setPosition({ x: targetX, y: targetY });
+  }, [persistedImages]);
+
+  // 以窗口中心为基准缩放
+  const handleZoomToCenter = useCallback((newScale: number) => {
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) {
+      setScale(newScale);
+      return;
+    }
+
+    const rect = canvasElement.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+
+    const oldScale = scaleRef.current;
+    const oldPosition = positionRef.current;
+
+    // 计算窗口中心在画布内容坐标系中的位置
+    const centerCanvasX = (centerX - oldPosition.x) / oldScale;
+    const centerCanvasY = (centerY - oldPosition.y) / oldScale;
+
+    // 计算新的位置，使窗口中心指向的点保持不变
+    const newX = centerX - centerCanvasX * newScale;
+    const newY = centerY - centerCanvasY * newScale;
+
+    setScale(newScale);
+    setPosition({ x: newX, y: newY });
   }, []);
 
 
@@ -1435,6 +1677,8 @@ function CanvasApp() {
                   }}
                   onImageDoubleClick={handleImageDoubleClick}
                   onDeleteImage={(imageId) => handleDeleteImage(imageId)}
+                  onRegenerateImage={handleRegenerateImage}
+                  onAddAsReferenceImage={handleAddAsReferenceImage}
                 />
                 
                 {/* 渲染本地占位符（正在生成中的图片）和失败的图片 */}
@@ -1562,11 +1806,12 @@ function CanvasApp() {
           </div>
 
 
-          {/* 缩放控制器 - 左下角悬浮式（需求 1.3, 8.1, 8.2, 8.4） */}
+          {/* 缩放控制器 - 左侧垂直侧边栏（需求 1.3, 8.1, 8.2, 8.4） */}
           <CanvasZoomControl
             scale={scale}
             onScaleChange={setScale}
-            onReset={handleResetView}
+            onZoomToCenter={handleZoomToCenter}
+            onFitAll={handleFitAllImages}
             minScale={0.1}
             maxScale={3}
             onOpenImageLibrary={() => setShowImageLibrary(true)}
@@ -1726,6 +1971,40 @@ function CanvasApp() {
           navigator.clipboard.writeText(image.url);
         }}
       />
+
+      {/* Toast 提示组件 */}
+      {showToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+          <div className={`px-4 py-2.5 rounded-xl shadow-lg backdrop-blur-sm flex items-center gap-2 ${
+            toastType === 'success' ? 'bg-emerald-500/90 text-white' :
+            toastType === 'error' ? 'bg-red-500/90 text-white' :
+            toastType === 'warning' ? 'bg-amber-500/90 text-white' :
+            'bg-zinc-700/90 text-zinc-100'
+          }`}>
+            {toastType === 'success' && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            {toastType === 'error' && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            {toastType === 'warning' && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            )}
+            {toastType === 'info' && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <span className="text-sm font-medium">{toastMessage}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -231,21 +231,29 @@ export const RefImageUploader: React.FC<RefImageUploaderProps> = ({
 };
 
 // ============================================
-// RefImagePreview 组件 - 参考图预览区域
+// RefImagePreview 组件 - 参考图预览区域（支持拖拽排序）
 // ============================================
 
 interface RefImagePreviewProps {
   images: UploadedImage[];
   onRemove: (imageId: string) => void;
+  onReorder?: (images: UploadedImage[]) => void;  // 拖拽排序回调
+  onDragStateChange?: (isDragging: boolean) => void;  // 通知父组件拖拽状态
   disabled?: boolean;
 }
 
 export const RefImagePreview: React.FC<RefImagePreviewProps> = ({
   images,
   onRemove,
+  onReorder,
+  onDragStateChange,
   disabled = false,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // 拖拽状态
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);  // 用于延迟隐藏被拖拽元素
 
   // 如果没有图片，不渲染任何内容
   if (images.length === 0) {
@@ -257,6 +265,109 @@ export const RefImagePreview: React.FC<RefImagePreviewProps> = ({
     if (!disabled) {
       onRemove(imageId);
     }
+  };
+
+  // 拖拽开始（需求 4.1）
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    if (disabled || !onReorder) return;
+    setDraggedIndex(index);
+    setDropTargetIndex(index);  // 初始化目标位置为当前位置
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+    // 延迟设置拖拽状态，让浏览器先捕获拖拽预览图像
+    setTimeout(() => {
+      setIsDragging(true);
+    }, 0);
+    // 通知父组件开始拖拽
+    onDragStateChange?.(true);
+  };
+
+  // 拖拽经过（需求 4.4）- 计算插入位置
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();  // 阻止冒泡到父容器
+    if (disabled || !onReorder || draggedIndex === null) return;
+    
+    // 计算目标插入位置
+    if (index !== dropTargetIndex) {
+      setDropTargetIndex(index);
+    }
+  };
+
+  // 拖拽离开容器
+  const handleContainerDragLeave = (e: React.DragEvent) => {
+    // 检查是否真的离开了容器
+    const rect = scrollContainerRef.current?.getBoundingClientRect();
+    if (rect) {
+      const { clientX, clientY } = e;
+      if (
+        clientX < rect.left ||
+        clientX > rect.right ||
+        clientY < rect.top ||
+        clientY > rect.bottom
+      ) {
+        setDropTargetIndex(null);
+      }
+    }
+  };
+
+  // 拖拽结束
+  const handleDragEnd = () => {
+    // 在拖拽结束时执行重排序（如果有有效的目标位置）
+    if (draggedIndex !== null && dropTargetIndex !== null && draggedIndex !== dropTargetIndex && onReorder) {
+      const newImages = [...images];
+      const [draggedItem] = newImages.splice(draggedIndex, 1);
+      newImages.splice(dropTargetIndex, 0, draggedItem);
+      onReorder(newImages);
+    }
+    
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+    setIsDragging(false);
+    // 通知父组件结束拖拽
+    onDragStateChange?.(false);
+  };
+
+  // 放置（需求 4.2, 4.3）
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();  // 阻止冒泡到父容器
+    // 实际的重排序在 handleDragEnd 中处理
+  };
+
+  // 容器级别的 drop 处理
+  const handleContainerDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  // 计算每个元素的位移样式
+  const getItemStyle = (index: number): React.CSSProperties => {
+    if (draggedIndex === null || dropTargetIndex === null) {
+      return {};
+    }
+    
+    // 被拖拽的元素设置为不可见（延迟后才隐藏，让浏览器先捕获拖拽预览）
+    if (index === draggedIndex && isDragging) {
+      return { opacity: 0 };
+    }
+    
+    // 计算位移：当拖拽元素移动到新位置时，其他元素需要让位
+    const itemWidth = 72; // 64px 图片 + 8px gap
+    
+    if (draggedIndex < dropTargetIndex) {
+      // 向右拖拽：draggedIndex 和 dropTargetIndex 之间的元素向左移动
+      if (index > draggedIndex && index <= dropTargetIndex) {
+        return { transform: `translateX(-${itemWidth}px)` };
+      }
+    } else if (draggedIndex > dropTargetIndex) {
+      // 向左拖拽：dropTargetIndex 和 draggedIndex 之间的元素向右移动
+      if (index >= dropTargetIndex && index < draggedIndex) {
+        return { transform: `translateX(${itemWidth}px)` };
+      }
+    }
+    
+    return {};
   };
 
   return (
@@ -274,23 +385,38 @@ export const RefImagePreview: React.FC<RefImagePreviewProps> = ({
           scrollbarWidth: 'thin',
           msOverflowStyle: 'none',
         }}
+        onDragLeave={handleContainerDragLeave}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={handleContainerDrop}
       >
-        {images.map((image) => (
+        {images.map((image, index) => (
           <div
             key={image.id}
             className="relative flex-shrink-0 group"
+            style={{
+              ...getItemStyle(index),
+              transition: draggedIndex !== null ? 'transform 200ms ease-out, opacity 150ms ease-out' : 'none',
+            }}
+            draggable={!disabled && !!onReorder}
+            onDragStart={(e) => handleDragStart(e, index)}
+            onDragOver={(e) => handleDragOver(e, index)}
+            onDragEnd={handleDragEnd}
+            onDrop={handleDrop}
           >
             {/* 图片预览 */}
             <div 
-              className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700/50 
+              className={`w-16 h-16 rounded-lg overflow-hidden border border-zinc-700/50 
                          bg-zinc-800/60 backdrop-blur-sm thumbnail-hover
-                         transition-all duration-200 ease-out"
+                         transition-shadow duration-200 ease-out ${
+                           !disabled && onReorder ? 'cursor-grab active:cursor-grabbing' : ''
+                         }`}
             >
               <img
                 src={image.preview || image.base64}
                 alt={image.name}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover pointer-events-none"
                 loading="lazy"
+                draggable={false}
               />
             </div>
             
@@ -375,6 +501,7 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
   const [showEmptyWarning, setShowEmptyWarning] = useState(false);
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isInternalDragging, setIsInternalDragging] = useState(false);  // 内部参考图拖拽状态
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const dialogContainerRef = useRef<HTMLDivElement>(null);
@@ -491,10 +618,11 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isGenerating) {
+    // 只有在非内部拖拽时才显示拖拽提示
+    if (!isGenerating && !isInternalDragging) {
       setIsDragOver(true);
     }
-  }, [isGenerating]);
+  }, [isGenerating, isInternalDragging]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -513,6 +641,73 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
       }
     }
   }, []);
+
+  // 处理粘贴图片（Ctrl+V）
+  const handlePaste = useCallback(async (e: ClipboardEvent) => {
+    if (isGenerating) return;
+    
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          imageFiles.push(file);
+        }
+      }
+    }
+
+    if (imageFiles.length === 0) return;
+
+    // 阻止默认粘贴行为（避免在输入框中粘贴图片路径）
+    e.preventDefault();
+
+    const remainingSlots = 14 - refImages.length;
+    const filesToProcess = imageFiles.slice(0, remainingSlots);
+
+    const uploadedImages: UploadedImage[] = [];
+    const timestamp = Date.now();
+
+    for (let i = 0; i < filesToProcess.length; i++) {
+      const file = filesToProcess[i];
+      // 验证文件大小（最大 10MB）
+      if (file.size > 10 * 1024 * 1024) continue;
+
+      // 读取文件为 Base64
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      const uniqueId = `ref-${timestamp}-${i}-${Math.random().toString(36).slice(2, 11)}`;
+
+      uploadedImages.push({
+        id: uniqueId,
+        file,
+        base64,
+        preview: URL.createObjectURL(file),
+        name: file.name || `pasted-image-${i + 1}.png`,
+        size: file.size,
+      });
+    }
+
+    if (uploadedImages.length > 0) {
+      handleRefImageUpload(uploadedImages);
+    }
+  }, [isGenerating, refImages.length, handleRefImageUpload]);
+
+  // 监听全局粘贴事件
+  useEffect(() => {
+    document.addEventListener('paste', handlePaste);
+    return () => {
+      document.removeEventListener('paste', handlePaste);
+    };
+  }, [handlePaste]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
@@ -564,7 +759,12 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
   return (
     <div 
       ref={dialogContainerRef}
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-[800px] px-4 dialog-container sm:bottom-6 sm:px-4"
+      className="fixed bottom-6 z-40 dialog-container"
+      style={{
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: 'clamp(320px, calc(100vw - 200px), 800px)',
+      }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -588,12 +788,11 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
                 <span className="text-xs text-zinc-400 animate-pulse-soft">
                   {generationStatus || '正在生成图片...'}
                 </span>
-                <span className="text-xs text-zinc-500">{Math.round(generationProgress)}%</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-700/50 rounded-full overflow-hidden">
                 <div 
-                  className="h-full progress-animated transition-all duration-300 ease-out rounded-full"
-                  style={{ width: `${generationProgress}%` }}
+                  className="h-full progress-animated rounded-full"
+                  style={{ width: '100%' }}
                 />
               </div>
             </div>
@@ -617,6 +816,8 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
         <RefImagePreview
           images={refImages}
           onRemove={handleRefImageRemove}
+          onReorder={onRefImagesChange}
+          onDragStateChange={setIsInternalDragging}
           disabled={isGenerating}
         />
       </div>
