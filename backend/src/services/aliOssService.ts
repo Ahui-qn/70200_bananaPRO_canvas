@@ -152,7 +152,8 @@ class AliOssService {
       await this.client.put(ossKey, buffer, {
         headers: {
           'Content-Type': contentType,
-          'x-oss-object-acl': 'public-read'
+          'x-oss-object-acl': 'public-read',
+          'Cache-Control': 'public, max-age=31536000, immutable' // 1年缓存，OSS key 包含时间戳所以可以用 immutable
         }
       });
 

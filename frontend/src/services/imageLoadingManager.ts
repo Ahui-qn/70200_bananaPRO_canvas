@@ -35,7 +35,7 @@ type StateChangeCallback = (imageId: string, state: LoadingState) => void;
 const LOAD_DELAY = 300;
 
 // 缩放比例阈值：低于此值使用缩略图，高于或等于此值使用原图
-const SCALE_THRESHOLD = 0.5;
+const SCALE_THRESHOLD = 0.7;
 
 // 防抖延迟时间（毫秒）
 const DEBOUNCE_DELAY = 300;
@@ -326,6 +326,19 @@ export class ImageLoadingManager {
         }
         return;
       }
+      // 如果是占位符状态，重新进入视口，继续之前的加载流程
+      if (existingTask.state === 'placeholder') {
+        existingTask.enterViewportTime = Date.now();
+        // 如果有缩略图，尝试加载缩略图
+        if (thumbnailUrl) {
+          this.loadThumbnail(imageId, thumbnailUrl);
+        }
+        // 如果当前应该显示原图，安排加载
+        if (this.shouldLoadOriginal(this.currentScale)) {
+          this.scheduleHighResLoad(imageId);
+        }
+        return;
+      }
     }
 
     // 检查图片是否已经在缓存中
@@ -531,6 +544,11 @@ export class ImageLoadingManager {
         task.state = 'thumbnail';
         this.notifyStateChange(imageId, 'thumbnail');
       }
+      return;
+    }
+
+    // 检查是否已经在加载中（避免重复请求）
+    if (task.state !== 'placeholder') {
       return;
     }
 

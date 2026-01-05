@@ -105,13 +105,13 @@ class ImageDimensionService {
         thumbWidth = Math.round((width / height) * THUMBNAIL_MAX_SIZE);
       }
 
-      // 生成缩略图
+      // 生成缩略图（使用 WebP 格式，比 JPEG 更小）
       const thumbnailBuffer = await sharp(buffer)
         .resize(thumbWidth, thumbHeight, {
           fit: 'inside',
           withoutEnlargement: true, // 如果原图比缩略图小，不放大
         })
-        .jpeg({ quality: 80 }) // 使用 JPEG 格式，质量 80%
+        .webp({ quality: 75 }) // 使用 WebP 格式，质量 75%
         .toBuffer();
 
       // 获取实际生成的缩略图尺寸

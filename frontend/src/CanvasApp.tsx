@@ -207,6 +207,15 @@ function CanvasApp() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragTarget, setDragTarget] = useState<'canvas' | string>('canvas');
   const canvasRef = useRef<HTMLDivElement>(null);
+  const canvasContentRef = useRef<HTMLDivElement>(null);  // 画布内容容器 ref（用于 imperative DOM 操作）
+  
+  // 正在拖拽的图片 ID 集合（用于 will-change 优化）
+  const [draggingImageIds, setDraggingImageIds] = useState<Set<string>>(new Set());
+  
+  // 是否正在进行 pan/zoom 交互（用于跳过 React 重渲染）
+  const isPanningRef = useRef(false);
+  const isZoomingRef = useRef(false);
+  const zoomEndTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // 是否显示「定位到最新」按钮（需求 7.3）
   const [showLocateLatest, setShowLocateLatest] = useState(false);
@@ -730,9 +739,11 @@ function CanvasApp() {
   }, [showToast]);
 
   // 滚轮缩放 - 以鼠标位置为中心缩放
+  // 性能优化：交互过程中直接操作 DOM，交互结束后再同步 state
   useEffect(() => {
     const canvasElement = canvasRef.current;
-    if (!canvasElement) return;
+    const canvasContentElement = canvasContentRef.current;
+    if (!canvasElement || !canvasContentElement) return;
 
     const handleWheelZoom = (e: WheelEvent) => {
       e.preventDefault();
@@ -763,13 +774,36 @@ function CanvasApp() {
       const newX = mouseX - mouseCanvasX * newScale;
       const newY = mouseY - mouseCanvasY * newScale;
       
-      setScale(newScale);
-      setPosition({ x: newX, y: newY });
+      // 更新 ref 中的实时值
+      scaleRef.current = newScale;
+      positionRef.current = { x: newX, y: newY };
+      
+      // 直接操作 DOM，避免 React 重渲染
+      canvasContentElement.style.transform = `translate3d(${newX}px, ${newY}px, 0) scale(${newScale})`;
+      
+      // 标记正在缩放
+      isZoomingRef.current = true;
+      
+      // 清除之前的定时器
+      if (zoomEndTimerRef.current) {
+        clearTimeout(zoomEndTimerRef.current);
+      }
+      
+      // 缩放结束后同步 state（150ms 无操作视为结束）
+      zoomEndTimerRef.current = setTimeout(() => {
+        isZoomingRef.current = false;
+        // 同步 state，触发可见图片重新计算
+        setScale(scaleRef.current);
+        setPosition(positionRef.current);
+      }, 150);
     };
 
     canvasElement.addEventListener('wheel', handleWheelZoom, { passive: false });
-        return () => {
+    return () => {
       canvasElement.removeEventListener('wheel', handleWheelZoom);
+      if (zoomEndTimerRef.current) {
+        clearTimeout(zoomEndTimerRef.current);
+      }
     };
   }, [loading, showImageLibrary]); // 当 loading 或 showImageLibrary 状态变化时重新绑定事件
 
@@ -917,7 +951,8 @@ function CanvasApp() {
       if (toolMode.currentMode === 'hand') {
         setIsDragging(true);
         setDragTarget('canvas');
-        setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+        setDragStart({ x: e.clientX - positionRef.current.x, y: e.clientY - positionRef.current.y });
+        isPanningRef.current = true;
         return;
       }
       
@@ -927,8 +962,8 @@ function CanvasApp() {
         const canvasElement = canvasRef.current;
         if (canvasElement) {
           const rect = canvasElement.getBoundingClientRect();
-          const canvasX = (e.clientX - rect.left - position.x) / scale;
-          const canvasY = (e.clientY - rect.top - position.y) / scale;
+          const canvasX = (e.clientX - rect.left - positionRef.current.x) / scaleRef.current;
+          const canvasY = (e.clientY - rect.top - positionRef.current.y) / scaleRef.current;
           
           // 开始框选（需求 3.1）
           startSelectionBox({ x: canvasX, y: canvasY });
@@ -942,6 +977,8 @@ function CanvasApp() {
           selectionActions.clearSelection();
         }
         setSelectedImageId(null);
+        // 清除拖拽图片集合
+        setDraggingImageIds(new Set());
         
         // 在移动工具模式下，点击空白处只启动框选，不拖动画布
         // isDragging 用于追踪鼠标是否按下
@@ -964,17 +1001,26 @@ function CanvasApp() {
           // 点击已选中的图片：保持选中状态以便拖动（需求 5.4）
           
           // 记录鼠标在画布坐标系中的位置
-          const mouseCanvasX = (e.clientX - position.x) / scale;
-          const mouseCanvasY = (e.clientY - position.y) / scale;
+          const mouseCanvasX = (e.clientX - positionRef.current.x) / scaleRef.current;
+          const mouseCanvasY = (e.clientY - positionRef.current.y) / scaleRef.current;
           setDragStart({ x: mouseCanvasX - img.x, y: mouseCanvasY - img.y });
           setSelectedImageId(target);
+          
+          // 设置正在拖拽的图片 ID 集合（用于 will-change 优化）
+          if (selection.selectedIds.has(target) && selection.selectedIds.size > 1) {
+            // 多选拖拽
+            setDraggingImageIds(new Set(selection.selectedIds));
+          } else {
+            // 单选拖拽
+            setDraggingImageIds(new Set([target]));
+          }
           
           setIsDragging(true);
           setDragTarget(target);
         }
       }
     }
-  }, [position, canvasImages, scale, toolMode.currentMode, selection.selectedIds, selectionActions, startSelectionBox]);
+  }, [canvasImages, toolMode.currentMode, selection.selectedIds, selectionActions, startSelectionBox]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     // 更新框选区域（需求 3.2）
@@ -982,8 +1028,8 @@ function CanvasApp() {
       const canvasElement = canvasRef.current;
       if (canvasElement) {
         const rect = canvasElement.getBoundingClientRect();
-        const canvasX = (e.clientX - rect.left - position.x) / scale;
-        const canvasY = (e.clientY - rect.top - position.y) / scale;
+        const canvasX = (e.clientX - rect.left - positionRef.current.x) / scaleRef.current;
+        const canvasY = (e.clientY - rect.top - positionRef.current.y) / scaleRef.current;
         updateSelectionBox({ x: canvasX, y: canvasY });
       }
       // 框选模式下不执行其他拖动逻辑
@@ -993,15 +1039,25 @@ function CanvasApp() {
     if (!isDragging) return;
     
     if (dragTarget === 'canvas') {
-      // 抓手模式下的画布拖动
-      setPosition({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+      // 抓手模式下的画布拖动 - 使用 imperative DOM 操作
+      const newX = e.clientX - dragStart.x;
+      const newY = e.clientY - dragStart.y;
+      
+      // 更新 ref 中的实时值
+      positionRef.current = { x: newX, y: newY };
+      
+      // 直接操作 DOM，避免 React 重渲染
+      const canvasContentElement = canvasContentRef.current;
+      if (canvasContentElement) {
+        canvasContentElement.style.transform = `translate3d(${newX}px, ${newY}px, 0) scale(${scaleRef.current})`;
+      }
     } else if (dragTarget === 'selection') {
       // 框选模式 - 由上面的 selectionBox.isActive 处理
       // 这里不需要额外处理
     } else {
       // 拖动图片
-      const mouseCanvasX = (e.clientX - position.x) / scale;
-      const mouseCanvasY = (e.clientY - position.y) / scale;
+      const mouseCanvasX = (e.clientX - positionRef.current.x) / scaleRef.current;
+      const mouseCanvasY = (e.clientY - positionRef.current.y) / scaleRef.current;
       const newX = mouseCanvasX - dragStart.x;
       const newY = mouseCanvasY - dragStart.y;
       
@@ -1037,7 +1093,7 @@ function CanvasApp() {
         }
       }
     }
-  }, [isDragging, dragTarget, dragStart, localCanvasImages, updateImagePosition, position, scale, selectionBox.isActive, updateSelectionBox, selection.selectedIds, canvasImages]);
+  }, [isDragging, dragTarget, dragStart, localCanvasImages, updateImagePosition, selectionBox.isActive, updateSelectionBox, selection.selectedIds, canvasImages]);
 
   const handleMouseUp = useCallback(() => {
     // 结束框选（需求 3.4）
@@ -1055,10 +1111,17 @@ function CanvasApp() {
       }
     }
     
-    // 如果是拖拽画布（抓手模式），显示「定位到最新」按钮（需求 7.3）
+    // 如果是拖拽画布（抓手模式），同步 state 并显示「定位到最新」按钮（需求 7.3）
     if (isDragging && dragTarget === 'canvas') {
+      isPanningRef.current = false;
+      // 同步 state，确保 React 状态与 DOM 一致
+      setPosition(positionRef.current);
       setShowLocateLatest(true);
     }
+    
+    // 清除拖拽图片集合（移除 will-change）
+    setDraggingImageIds(new Set());
+    
     // 图片位置不在这里保存，而是在页面卸载/组件销毁时统一保存
     setIsDragging(false);
     setDragTarget('canvas'); // 重置拖动目标
@@ -1651,11 +1714,15 @@ function CanvasApp() {
           }} />
 
           {/* 画布内容 */}
-          <div className={`canvas-content absolute inset-0 ${!isDragging ? 'with-transition' : ''}`} style={{ 
-            transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`, 
-            transformOrigin: '0 0',
-            willChange: isDragging ? 'transform' : 'auto',
-          }}>
+          <div 
+            ref={canvasContentRef}
+            className={`canvas-content absolute inset-0 ${!isDragging ? 'with-transition' : ''}`} 
+            style={{ 
+              transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`, 
+              transformOrigin: '0 0',
+              willChange: isDragging ? 'transform' : 'auto',
+            }}
+          >
             {/* 选区框组件（需求 3.1, 8.1） */}
             <SelectionBox
               startPoint={selectionBox.startPoint}
@@ -1671,6 +1738,7 @@ function CanvasApp() {
                   viewport={currentViewport}
                   selectedImageId={selectedImageId}
                   selectedIds={selection.selectedIds}
+                  draggingIds={draggingImageIds}
                   onImageMouseDown={(e, imageId) => {
                     e.stopPropagation();
                     handleMouseDown(e, imageId, e.shiftKey);
@@ -1686,7 +1754,13 @@ function CanvasApp() {
                   <div 
                     key={img.id} 
                     className={`absolute cursor-move group ${selectedImageId === img.id ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-transparent' : ''}`} 
-                    style={{ left: img.x, top: img.y, width: img.width, height: img.height }} 
+                    style={{ 
+                      top: 0, 
+                      left: 0, 
+                      transform: `translate3d(${img.x}px, ${img.y}px, 0)`,
+                      width: img.width, 
+                      height: img.height 
+                    }} 
                     onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, img.id); }}
                   >
                     {img.isFailed ? (

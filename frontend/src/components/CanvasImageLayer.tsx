@@ -34,6 +34,8 @@ interface CanvasImageLayerProps {
   selectedImageId: string | null;
   // 选中的图片 ID 集合（多选）
   selectedIds?: Set<string>;
+  // 正在拖拽的图片 ID 集合（用于 will-change 优化）
+  draggingIds?: Set<string>;
   // 图片点击事件
   onImageMouseDown: (e: React.MouseEvent, imageId: string) => void;
   // 图片双击事件（查看详情）
@@ -107,6 +109,7 @@ const getCanvasDisplaySize = (image: CanvasImage, maxSize: number = 400): { widt
 const CanvasImageItem: React.FC<{
   image: CanvasImage;
   isSelected: boolean;
+  isDragging: boolean;  // 是否正在被拖拽（用于 will-change 优化）
   scale: number;  // 当前缩放比例
   onMouseDown: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
@@ -119,6 +122,7 @@ const CanvasImageItem: React.FC<{
 }> = ({
   image,
   isSelected,
+  isDragging,
   scale,
   onMouseDown,
   onDoubleClick,
@@ -256,10 +260,12 @@ const CanvasImageItem: React.FC<{
         isSelected ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-transparent' : ''
       }`}
       style={{
-        left: imgX,
-        top: imgY,
+        top: 0,
+        left: 0,
+        transform: `translate3d(${imgX}px, ${imgY}px, 0)`,
         width: imgWidth,
         height: imgHeight,
+        willChange: isDragging ? 'transform' : 'auto',
       }}
       onMouseDown={onMouseDown}
       onDoubleClick={(e) => {
@@ -450,6 +456,7 @@ const CanvasImageItem: React.FC<{
 /**
  * 视口外图片的轻量级占位符
  * 使用按比例计算的显示尺寸
+ * 使用 transform 定位避免 Layout/Reflow
  */
 const ImagePlaceholder: React.FC<{
   image: CanvasImage;
@@ -465,8 +472,9 @@ const ImagePlaceholder: React.FC<{
     <div
       className="absolute bg-zinc-800/30 rounded-xl border border-zinc-700/30"
       style={{
-        left: imgX,
-        top: imgY,
+        top: 0,
+        left: 0,
+        transform: `translate3d(${imgX}px, ${imgY}px, 0)`,
         width: imgWidth,
         height: imgHeight,
       }}
@@ -512,12 +520,17 @@ const LoadingPlaceholder: React.FC<{
  * 实现虚拟渲染，只渲染视口内可见的图片 DOM 元素
  * 视口外的图片使用轻量级占位符
  * 根据缩放比例动态选择缩略图或原图
+ * 
+ * 性能优化：
+ * - 使用 transform: translate3d() 定位，避免 Layout/Reflow
+ * - 拖拽时动态添加 will-change: transform，结束后移除
  */
 export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
   images,
   viewport,
   selectedImageId,
   selectedIds,
+  draggingIds,
   onImageMouseDown,
   onImageDoubleClick,
   onDeleteImage,
@@ -587,6 +600,11 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
     return selectedImageId === imageId;
   }, [selectedIds, selectedImageId]);
 
+  // 判断图片是否正在被拖拽
+  const isImageDragging = useCallback((imageId: string) => {
+    return draggingIds?.has(imageId) ?? false;
+  }, [draggingIds]);
+
   return (
     <>
       {/* 渲染视口外的轻量级占位符 */}
@@ -602,6 +620,7 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
           key={img.id}
           image={img}
           isSelected={isImageSelected(img.id)}
+          isDragging={isImageDragging(img.id)}
           scale={scale}
           onMouseDown={(e) => handleImageMouseDown(e, img.id)}
           onDoubleClick={() => onImageDoubleClick(img)}
