@@ -204,14 +204,39 @@ const CanvasImageItem: React.FC<{
       setIsHighResLoaded(true);
     }
 
-    // 定期检查加载状态（简单的轮询方式）
+    // 定期检查加载状态和 Blob URL 缓存（简单的轮询方式）
     let checkInterval: NodeJS.Timeout | null = null;
     
     // 只有在未加载完成时才需要轮询
     if (currentState !== 'loaded') {
       checkInterval = setInterval(() => {
         const state = imageLoadingManager.getLoadingState(image.id);
+        
+        // 同时检查 Blob URL 是否已经可用
+        // 检查原图和缩略图的 Blob URL
+        const originalBlobUrl = typeof imageLoadingManager.getBlobUrl === 'function' 
+          ? imageLoadingManager.getBlobUrl(image.url) 
+          : null;
+        const thumbnailBlobUrl = image.thumbnailUrl && typeof imageLoadingManager.getBlobUrl === 'function'
+          ? imageLoadingManager.getBlobUrl(image.thumbnailUrl)
+          : null;
+        const hasBlobUrl = !!(originalBlobUrl || thumbnailBlobUrl);
+        
         setLoadingState(prevState => {
+          // 如果 Blob URL 已可用，强制触发重新渲染
+          if (hasBlobUrl && prevState !== 'loaded') {
+            setBlobCacheVersion(v => v + 1);
+            
+            if (state === 'loaded') {
+              setIsHighResLoaded(true);
+              if (checkInterval) {
+                clearInterval(checkInterval);
+                checkInterval = null;
+              }
+            }
+            return state;
+          }
+          
           if (state !== prevState) {
             // 状态变化时，触发重新渲染以获取最新的 Blob URL
             setBlobCacheVersion(v => v + 1);
@@ -263,28 +288,28 @@ const CanvasImageItem: React.FC<{
       return null; // 返回 null，显示占位符
     }
     
-    // 确定应该使用哪个原始 URL
-    let targetOriginalUrl: string;
+    // 策略：尝试获取最佳可用的 Blob URL
+    // 1. 如果是缩略图模式，优先用缩略图
+    // 2. 如果是原图模式，优先用原图，回退到缩略图
+    // 3. 无论哪种模式，只要有可用的 Blob URL 就显示
+    
+    const originalBlobUrl = imageLoadingManager.getBlobUrl(image.url);
+    const thumbnailBlobUrl = image.thumbnailUrl 
+      ? imageLoadingManager.getBlobUrl(image.thumbnailUrl) 
+      : null;
     
     if (currentSourceType === 'thumbnail') {
-      // 缩略图模式：优先使用缩略图
-      targetOriginalUrl = image.thumbnailUrl || image.url;
+      // 缩略图模式：优先缩略图，回退到原图
+      return thumbnailBlobUrl || originalBlobUrl || null;
     } else {
-      // 原图模式
+      // 原图模式：优先原图，回退到缩略图（渐进式加载）
       if (isHighResLoaded || loadingState === 'loaded') {
-        targetOriginalUrl = image.url;
-      } else if (image.thumbnailUrl && (loadingState === 'thumbnail' || loadingState === 'loading')) {
-        // 原图还在加载，先用缩略图
-        targetOriginalUrl = image.thumbnailUrl;
+        return originalBlobUrl || thumbnailBlobUrl || null;
       } else {
-        targetOriginalUrl = image.url;
+        // 原图还在加载，先用缩略图
+        return thumbnailBlobUrl || originalBlobUrl || null;
       }
     }
-    
-    // 只返回缓存的 Blob URL，不返回原始 OSS URL
-    // 这样 <img> 标签就不会直接请求 OSS
-    const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
-    return cachedBlobUrl || null;
   }, [image.url, image.thumbnailUrl, loadingState, isHighResLoaded, currentSourceType, blobCacheVersion]);
   
   // 是否有可显示的图片（Blob URL 已缓存）

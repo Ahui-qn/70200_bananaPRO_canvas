@@ -76,6 +76,13 @@ export class ImageLoadingManager {
   // 图片内存缓存（URL -> HTMLImageElement）
   private imageCache: Map<string, HTMLImageElement> = new Map();
   
+  // Blob URL 缓存（原始 URL -> Blob URL）
+  // 使用 Blob URL 可以避免浏览器重复请求，因为 Blob URL 指向内存中的数据
+  private blobUrlCache: Map<string, string> = new Map();
+  
+  // 正在加载中的 URL 集合（避免重复请求）
+  private loadingUrls: Set<string> = new Set();
+  
   // 缓存最大数量
   private maxCacheSize: number = 100;
   
@@ -104,6 +111,36 @@ export class ImageLoadingManager {
    */
   setSourceChangeCallback(callback: (imageId: string, sourceType: ImageSourceType) => void): void {
     this.onSourceChange = callback;
+  }
+
+  /**
+   * 获取缓存的 Blob URL
+   * 
+   * @param originalUrl 原始图片 URL
+   * @returns Blob URL 或 undefined
+   */
+  getBlobUrl(originalUrl: string): string | undefined {
+    return this.blobUrlCache.get(originalUrl);
+  }
+
+  /**
+   * 添加 Blob URL 到缓存
+   */
+  private addToBlobCache(originalUrl: string, blobUrl: string): void {
+    // 如果缓存已满，删除最早的条目并释放 Blob URL
+    if (this.blobUrlCache.size >= this.maxCacheSize) {
+      const firstKey = this.blobUrlCache.keys().next().value;
+      if (firstKey) {
+        const oldBlobUrl = this.blobUrlCache.get(firstKey);
+        if (oldBlobUrl) {
+          URL.revokeObjectURL(oldBlobUrl);
+        }
+        this.blobUrlCache.delete(firstKey);
+      }
+    }
+    
+    this.blobUrlCache.set(originalUrl, blobUrl);
+    console.log(`[BlobCache] 已缓存: ${originalUrl.substring(0, 50)}... -> ${blobUrl}`);
   }
 
   /**
@@ -305,6 +342,34 @@ export class ImageLoadingManager {
     thumbnailUrl?: string,
     priority: LoadingPriority = 'normal'
   ): void {
+    // 首先检查 Blob URL 缓存（最高优先级）
+    const cachedOriginalBlob = this.blobUrlCache.get(imageUrl);
+    const cachedThumbnailBlob = thumbnailUrl ? this.blobUrlCache.get(thumbnailUrl) : undefined;
+    
+    // 如果原图 Blob URL 已缓存，直接标记为已加载
+    if (cachedOriginalBlob) {
+      const existingTask = this.tasks.get(imageId);
+      if (existingTask) {
+        if (existingTask.state !== 'loaded') {
+          existingTask.state = 'loaded';
+          existingTask.enterViewportTime = Date.now();
+          this.notifyStateChange(imageId, 'loaded');
+        }
+      } else {
+        const task: LoadingTask = {
+          imageId,
+          imageUrl,
+          thumbnailUrl,
+          priority,
+          state: 'loaded',
+          enterViewportTime: Date.now(),
+        };
+        this.tasks.set(imageId, task);
+        this.notifyStateChange(imageId, 'loaded');
+      }
+      return;
+    }
+    
     // 如果已经在加载或已加载，不重复添加
     const existingTask = this.tasks.get(imageId);
     if (existingTask) {
@@ -329,8 +394,12 @@ export class ImageLoadingManager {
       // 如果是占位符状态，重新进入视口，继续之前的加载流程
       if (existingTask.state === 'placeholder') {
         existingTask.enterViewportTime = Date.now();
-        // 如果有缩略图，尝试加载缩略图
-        if (thumbnailUrl) {
+        // 如果有缩略图 Blob URL 缓存，直接使用
+        if (cachedThumbnailBlob) {
+          existingTask.state = 'thumbnail';
+          this.notifyStateChange(imageId, 'thumbnail');
+        } else if (thumbnailUrl) {
+          // 如果有缩略图 URL 但未缓存，尝试加载缩略图
           this.loadThumbnail(imageId, thumbnailUrl);
         }
         // 如果当前应该显示原图，安排加载
@@ -341,23 +410,10 @@ export class ImageLoadingManager {
       }
     }
 
-    // 检查图片是否已经在缓存中
-    const cachedOriginal = this.imageCache.get(imageUrl);
-    const cachedThumbnail = thumbnailUrl ? this.imageCache.get(thumbnailUrl) : undefined;
-    
-    // 如果原图已缓存，直接标记为已加载
-    if (cachedOriginal) {
-      const task: LoadingTask = {
-        imageId,
-        imageUrl,
-        thumbnailUrl,
-        priority,
-        state: 'loaded',
-        enterViewportTime: Date.now(),
-      };
-      this.tasks.set(imageId, task);
-      this.notifyStateChange(imageId, 'loaded');
-      return;
+    // 确定初始状态
+    let initialState: LoadingState = 'placeholder';
+    if (cachedThumbnailBlob) {
+      initialState = 'thumbnail';
     }
 
     const task: LoadingTask = {
@@ -365,7 +421,7 @@ export class ImageLoadingManager {
       imageUrl,
       thumbnailUrl,
       priority,
-      state: cachedThumbnail ? 'thumbnail' : 'placeholder',
+      state: initialState,
       enterViewportTime: Date.now(),
     };
 
@@ -373,7 +429,7 @@ export class ImageLoadingManager {
     this.notifyStateChange(imageId, task.state);
 
     // 如果有缩略图且未缓存，先加载缩略图
-    if (thumbnailUrl && !cachedThumbnail) {
+    if (thumbnailUrl && !cachedThumbnailBlob) {
       this.loadThumbnail(imageId, thumbnailUrl);
     }
 
@@ -507,6 +563,15 @@ export class ImageLoadingManager {
     // 清除图片缓存
     this.imageCache.clear();
     
+    // 清除 Blob URL 缓存并释放内存
+    this.blobUrlCache.forEach(blobUrl => {
+      URL.revokeObjectURL(blobUrl);
+    });
+    this.blobUrlCache.clear();
+    
+    // 清除正在加载的 URL 集合
+    this.loadingUrls.clear();
+    
     // 重置图片序号
     this.imageIndexMap.clear();
     this.nextImageIndex = 1;
@@ -537,9 +602,9 @@ export class ImageLoadingManager {
     const task = this.tasks.get(imageId);
     if (!task) return;
 
-    // 检查缓存，避免重复请求
-    const cached = this.imageCache.get(thumbnailUrl);
-    if (cached) {
+    // 检查 Blob URL 缓存
+    const cachedBlobUrl = this.blobUrlCache.get(thumbnailUrl);
+    if (cachedBlobUrl) {
       if (task.state === 'placeholder') {
         task.state = 'thumbnail';
         this.notifyStateChange(imageId, 'thumbnail');
@@ -552,21 +617,58 @@ export class ImageLoadingManager {
       return;
     }
 
+    // 检查该 URL 是否正在被其他任务加载
+    if (this.loadingUrls.has(thumbnailUrl)) {
+      return;
+    }
+
     const imgIndex = this.getImageDisplayIndex(imageId);
     console.log(`图片${imgIndex}：请求缩略图`);
 
-    const img = new Image();
-    img.onload = () => {
-      // 将缩略图添加到缓存
-      this.addToCache(thumbnailUrl, img);
-      
-      const currentTask = this.tasks.get(imageId);
-      if (currentTask && currentTask.state === 'placeholder') {
-        currentTask.state = 'thumbnail';
-        this.notifyStateChange(imageId, 'thumbnail');
-      }
-    };
-    img.src = thumbnailUrl;
+    // 标记为正在加载
+    this.loadingUrls.add(thumbnailUrl);
+
+    // 使用 fetch 获取图片数据，然后转换为 Blob URL
+    fetch(thumbnailUrl)
+      .then(response => {
+        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+        return response.blob();
+      })
+      .then(blob => {
+        // 从加载中集合移除
+        this.loadingUrls.delete(thumbnailUrl);
+        
+        // 创建 Blob URL 并缓存
+        const blobUrl = URL.createObjectURL(blob);
+        this.addToBlobCache(thumbnailUrl, blobUrl);
+        console.log(`图片${imgIndex}：缩略图 Blob URL 已缓存`);
+        
+        // 同时创建 HTMLImageElement 用于兼容
+        const img = new Image();
+        img.src = blobUrl;
+        this.addToCache(thumbnailUrl, img);
+        
+        const currentTask = this.tasks.get(imageId);
+        if (currentTask && currentTask.state === 'placeholder') {
+          currentTask.state = 'thumbnail';
+          this.notifyStateChange(imageId, 'thumbnail');
+        }
+      })
+      .catch((error) => {
+        // 从加载中集合移除
+        this.loadingUrls.delete(thumbnailUrl);
+        
+        const imgIndex = this.getImageDisplayIndex(imageId);
+        console.warn(`图片${imgIndex}：缩略图加载失败`, error);
+        
+        // 如果任务还在 placeholder 状态，尝试直接加载原图
+        const currentTask = this.tasks.get(imageId);
+        if (currentTask && currentTask.state === 'placeholder') {
+          if (this.shouldLoadOriginal(this.currentScale)) {
+            this.scheduleHighResLoad(imageId);
+          }
+        }
+      });
   }
 
   /**
@@ -589,7 +691,7 @@ export class ImageLoadingManager {
   }
 
   /**
-   * 开始加载高清图片
+   * 开始加载高清图片并转换为 Blob URL
    */
   private startHighResLoad(imageId: string): void {
     const task = this.tasks.get(imageId);
@@ -597,11 +699,27 @@ export class ImageLoadingManager {
       return;
     }
 
-    // 检查缓存，避免重复请求
-    const cached = this.imageCache.get(task.imageUrl);
-    if (cached) {
+    // 检查 Blob URL 缓存
+    const cachedBlobUrl = this.blobUrlCache.get(task.imageUrl);
+    if (cachedBlobUrl) {
       task.state = 'loaded';
       this.notifyStateChange(imageId, 'loaded');
+      return;
+    }
+
+    // 检查该 URL 是否正在被其他任务加载
+    if (this.loadingUrls.has(task.imageUrl)) {
+      // 等待其他任务加载完成后再检查
+      setTimeout(() => {
+        const cachedAfterWait = this.blobUrlCache.get(task.imageUrl);
+        if (cachedAfterWait) {
+          task.state = 'loaded';
+          this.notifyStateChange(imageId, 'loaded');
+        } else if (!this.loadingUrls.has(task.imageUrl)) {
+          // 其他任务加载失败，重新尝试
+          this.scheduleHighResLoad(imageId);
+        }
+      }, 100);
       return;
     }
 
@@ -629,41 +747,58 @@ export class ImageLoadingManager {
     task.state = 'loading';
     task.loadStartTime = Date.now();
     this.loadingCount++;
+    this.loadingUrls.add(task.imageUrl);
     this.notifyStateChange(imageId, 'loading');
 
-    // 加载高清图片
-    const img = new Image();
-    
-    img.onload = () => {
-      const currentTask = this.tasks.get(imageId);
-      if (currentTask) {
-        // 将原图添加到缓存
-        this.addToCache(task.imageUrl, img);
+    // 使用 fetch 获取图片数据，然后转换为 Blob URL
+    fetch(task.imageUrl)
+      .then(response => {
+        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+        return response.blob();
+      })
+      .then(blob => {
+        // 从加载中集合移除
+        this.loadingUrls.delete(task.imageUrl);
         
-        currentTask.state = 'loaded';
-        this.loadingCount--;
-        this.memoryUsage += this.estimateImageSize(task.imageUrl);
-        this.notifyStateChange(imageId, 'loaded');
+        const currentTask = this.tasks.get(imageId);
+        if (currentTask) {
+          // 创建 Blob URL 并缓存
+          const blobUrl = URL.createObjectURL(blob);
+          this.addToBlobCache(task.imageUrl, blobUrl);
+          console.log(`图片${imgIndex}：原图 Blob URL 已缓存`);
+          
+          // 同时创建 HTMLImageElement 用于兼容
+          const img = new Image();
+          img.src = blobUrl;
+          this.addToCache(task.imageUrl, img);
+          
+          currentTask.state = 'loaded';
+          this.loadingCount--;
+          this.memoryUsage += this.estimateImageSize(task.imageUrl);
+          this.notifyStateChange(imageId, 'loaded');
+          
+          // 处理队列中的下一个任务
+          this.processQueue();
+        }
+      })
+      .catch((error) => {
+        // 从加载中集合移除
+        this.loadingUrls.delete(task.imageUrl);
         
-        // 处理队列中的下一个任务
-        this.processQueue();
-      }
-    };
-
-    img.onerror = () => {
-      const currentTask = this.tasks.get(imageId);
-      if (currentTask) {
-        // 加载失败，回退到缩略图或占位符
-        currentTask.state = currentTask.thumbnailUrl ? 'thumbnail' : 'placeholder';
-        this.loadingCount--;
-        this.notifyStateChange(imageId, currentTask.state);
+        const imgIndex = this.getImageDisplayIndex(imageId);
+        console.warn(`图片${imgIndex}：原图加载失败`, error);
         
-        // 处理队列中的下一个任务
-        this.processQueue();
-      }
-    };
-
-    img.src = task.imageUrl;
+        const currentTask = this.tasks.get(imageId);
+        if (currentTask) {
+          // 加载失败，回退到缩略图或占位符
+          currentTask.state = currentTask.thumbnailUrl ? 'thumbnail' : 'placeholder';
+          this.loadingCount--;
+          this.notifyStateChange(imageId, currentTask.state);
+          
+          // 处理队列中的下一个任务
+          this.processQueue();
+        }
+      });
   }
 
   /**
