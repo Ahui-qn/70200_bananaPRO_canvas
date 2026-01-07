@@ -165,8 +165,13 @@ const CanvasImageItem: React.FC<{
     if (!image.url) return;
 
     // 检查是否已有缓存的 Blob URL（避免重复请求）
-    const hasCachedOriginal = !!imageLoadingManager.getBlobUrl(image.url);
-    const hasCachedThumbnail = image.thumbnailUrl ? !!imageLoadingManager.getBlobUrl(image.thumbnailUrl) : false;
+    // 安全检查：确保 getBlobUrl 方法存在
+    const hasCachedOriginal = typeof imageLoadingManager.getBlobUrl === 'function' 
+      ? !!imageLoadingManager.getBlobUrl(image.url) 
+      : false;
+    const hasCachedThumbnail = image.thumbnailUrl && typeof imageLoadingManager.getBlobUrl === 'function'
+      ? !!imageLoadingManager.getBlobUrl(image.thumbnailUrl) 
+      : false;
     
     // 如果原图已缓存，直接设置为已加载状态
     if (hasCachedOriginal) {
@@ -266,9 +271,12 @@ const CanvasImageItem: React.FC<{
     }
     
     // 优先返回缓存的 Blob URL（关键：避免浏览器重复请求）
-    const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
-    if (cachedBlobUrl) {
-      return cachedBlobUrl;
+    // 安全检查：确保 getBlobUrl 方法存在
+    if (typeof imageLoadingManager.getBlobUrl === 'function') {
+      const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
+      if (cachedBlobUrl) {
+        return cachedBlobUrl;
+      }
     }
     
     // 没有缓存，返回原始 URL（会触发 fetch 并缓存）
