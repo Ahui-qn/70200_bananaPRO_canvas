@@ -149,6 +149,9 @@ const CanvasImageItem: React.FC<{
   );
   const [isHighResLoaded, setIsHighResLoaded] = useState(false);
   
+  // Blob URL 缓存版本号（用于触发重新渲染）
+  const [blobCacheVersion, setBlobCacheVersion] = useState(0);
+  
   // 当前图片源类型
   const [currentSourceType, setCurrentSourceType] = useState<ImageSourceType>(
     imageLoadingManager.getSourceType(scale)
@@ -210,6 +213,9 @@ const CanvasImageItem: React.FC<{
         const state = imageLoadingManager.getLoadingState(image.id);
         setLoadingState(prevState => {
           if (state !== prevState) {
+            // 状态变化时，触发重新渲染以获取最新的 Blob URL
+            setBlobCacheVersion(v => v + 1);
+            
             if (state === 'loaded') {
               setIsHighResLoaded(true);
               if (checkInterval) {
@@ -279,7 +285,7 @@ const CanvasImageItem: React.FC<{
     // 这样 <img> 标签就不会直接请求 OSS
     const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
     return cachedBlobUrl || null;
-  }, [image.url, image.thumbnailUrl, loadingState, isHighResLoaded, currentSourceType]);
+  }, [image.url, image.thumbnailUrl, loadingState, isHighResLoaded, currentSourceType, blobCacheVersion]);
   
   // 是否有可显示的图片（Blob URL 已缓存）
   const hasDisplayableImage = displayUrl !== null;
