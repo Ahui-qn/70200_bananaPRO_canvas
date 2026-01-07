@@ -273,6 +273,10 @@ function CanvasApp() {
       // 没有保存的视口状态，定位到最新图片（需求 3.3）
       locateToLatestImage();
       setViewportRestored(true);
+    } else if (!canvasState && !viewportRestored && !isLoadingImages && persistedImages.length === 0) {
+      // 没有保存的视口状态且没有图片，使用默认视口状态
+      // 直接标记为已恢复，使用当前的默认值（scale=1, position={0,0}）
+      setViewportRestored(true);
     }
   }, [canvasState, viewportRestored, isLoadingImages, persistedImages.length]);
 
@@ -1738,21 +1742,24 @@ function CanvasApp() {
             {canvasImages.length > 0 ? (
               <>
                 {/* 使用 CanvasImageLayer 渲染持久化图片（虚拟渲染 + 渐进式加载）*/}
-                <CanvasImageLayer
-                  images={persistedImages}
-                  viewport={currentViewport}
-                  selectedImageId={selectedImageId}
-                  selectedIds={selection.selectedIds}
-                  draggingIds={draggingImageIds}
-                  onImageMouseDown={(e, imageId) => {
-                    e.stopPropagation();
-                    handleMouseDown(e, imageId, e.shiftKey);
-                  }}
-                  onImageDoubleClick={handleImageDoubleClick}
-                  onDeleteImage={(imageId) => handleDeleteImage(imageId)}
-                  onRegenerateImage={handleRegenerateImage}
-                  onAddAsReferenceImage={handleAddAsReferenceImage}
-                />
+                {/* 只有在视口状态恢复后才渲染图片，避免初始化时用错误的缩放比例请求图片 */}
+                {viewportRestored && (
+                  <CanvasImageLayer
+                    images={persistedImages}
+                    viewport={currentViewport}
+                    selectedImageId={selectedImageId}
+                    selectedIds={selection.selectedIds}
+                    draggingIds={draggingImageIds}
+                    onImageMouseDown={(e, imageId) => {
+                      e.stopPropagation();
+                      handleMouseDown(e, imageId, e.shiftKey);
+                    }}
+                    onImageDoubleClick={handleImageDoubleClick}
+                    onDeleteImage={(imageId) => handleDeleteImage(imageId)}
+                    onRegenerateImage={handleRegenerateImage}
+                    onAddAsReferenceImage={handleAddAsReferenceImage}
+                  />
+                )}
                 
                 {/* 渲染本地占位符（正在生成中的图片）和失败的图片 */}
                 {localCanvasImages.filter(img => img.isPlaceholder || img.isFailed).map((img) => (
