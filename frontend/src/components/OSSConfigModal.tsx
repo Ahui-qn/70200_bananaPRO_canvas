@@ -6,6 +6,9 @@ import {
   CheckCircle,
   Cloud,
   Lock,
+  RefreshCw,
+  AlertTriangle,
+  XCircle,
 } from 'lucide-react';
 
 interface OSSConfigModalProps {
@@ -17,6 +20,17 @@ interface OSSConfigModalProps {
 interface OSSConfigDisplay {
   region: string;
   bucket: string;
+}
+
+// OSS 状态类型
+type OSSStatusType = 'connected' | 'disconnected' | 'not_configured' | 'auth_error' | 'access_denied' | 'bucket_not_found' | 'time_error' | 'arrears' | 'error' | 'checking';
+
+interface OSSStatus {
+  isConnected: boolean;
+  status: OSSStatusType;
+  message: string;
+  errorCode?: string;
+  errorDetail?: string;
 }
 
 export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
@@ -34,6 +48,10 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
     text: string;
   } | null>(null);
   const [isConfigured, setIsConfigured] = useState(false);
+  
+  // OSS 连接状态
+  const [ossStatus, setOssStatus] = useState<OSSStatus | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
 
   const regionLabels: Record<string, string> = {
     'oss-cn-hangzhou': '华东1（杭州）',
@@ -53,6 +71,7 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadConfig();
+      checkOSSStatus();
     }
   }, [isOpen]);
 
@@ -73,6 +92,92 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
       setMessage({ type: 'error', text: '加载配置失败' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 检查 OSS 连接状态
+  const checkOSSStatus = async () => {
+    try {
+      setCheckingStatus(true);
+      setOssStatus({ isConnected: false, status: 'checking', message: '正在检查连接...' });
+      
+      const response = await apiService.getOSSStatus();
+      if (response.success && response.data) {
+        setOssStatus(response.data);
+      } else {
+        setOssStatus({
+          isConnected: false,
+          status: 'error',
+          message: response.error || '检查状态失败'
+        });
+      }
+    } catch (error: any) {
+      console.warn('检查 OSS 状态失败:', error);
+      setOssStatus({
+        isConnected: false,
+        status: 'error',
+        message: '无法连接到服务器'
+      });
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  // 获取状态显示信息
+  const getStatusDisplay = (status: OSSStatus | null) => {
+    if (!status) return null;
+    
+    switch (status.status) {
+      case 'checking':
+        return {
+          icon: <RefreshCw className="w-4 h-4 animate-spin" />,
+          color: 'text-blue-400',
+          bgColor: 'bg-blue-500/10 border-blue-500/20',
+          label: '检查中'
+        };
+      case 'connected':
+        return {
+          icon: <CheckCircle className="w-4 h-4" />,
+          color: 'text-emerald-400',
+          bgColor: 'bg-emerald-500/10 border-emerald-500/20',
+          label: '已连接'
+        };
+      case 'not_configured':
+        return {
+          icon: <AlertCircle className="w-4 h-4" />,
+          color: 'text-amber-400',
+          bgColor: 'bg-amber-500/10 border-amber-500/20',
+          label: '未配置'
+        };
+      case 'auth_error':
+        return {
+          icon: <XCircle className="w-4 h-4" />,
+          color: 'text-red-400',
+          bgColor: 'bg-red-500/10 border-red-500/20',
+          label: '认证失败'
+        };
+      case 'access_denied':
+      case 'arrears':
+        return {
+          icon: <AlertTriangle className="w-4 h-4" />,
+          color: 'text-orange-400',
+          bgColor: 'bg-orange-500/10 border-orange-500/20',
+          label: status.status === 'arrears' ? '账户欠费' : '访问被拒绝'
+        };
+      case 'bucket_not_found':
+        return {
+          icon: <XCircle className="w-4 h-4" />,
+          color: 'text-red-400',
+          bgColor: 'bg-red-500/10 border-red-500/20',
+          label: 'Bucket 不存在'
+        };
+      default:
+        return {
+          icon: <XCircle className="w-4 h-4" />,
+          color: 'text-red-400',
+          bgColor: 'bg-red-500/10 border-red-500/20',
+          label: '连接失败'
+        };
     }
   };
 
@@ -129,6 +234,31 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
             </div>
           ) : (
             <>
+              {/* OSS 连接状态 */}
+              {ossStatus && (
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${getStatusDisplay(ossStatus)?.bgColor}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={getStatusDisplay(ossStatus)?.color}>
+                      {getStatusDisplay(ossStatus)?.icon}
+                    </span>
+                    <div>
+                      <span className={`text-sm font-medium ${getStatusDisplay(ossStatus)?.color}`}>
+                        {getStatusDisplay(ossStatus)?.label}
+                      </span>
+                      <p className="text-xs text-zinc-500 mt-0.5">{ossStatus.message}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={checkOSSStatus}
+                    disabled={checkingStatus}
+                    className="btn-glass p-2 rounded-lg hover:bg-white/5 disabled:opacity-50"
+                    title="重新检查"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-zinc-400 ${checkingStatus ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-zinc-400 mb-2">区域</label>

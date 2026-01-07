@@ -205,7 +205,14 @@ class ApiService {
     return this.request('/database/status');
   }
 
-  async getOSSStatus(): Promise<ApiResponse<{ isConnected: boolean }>> {
+  // OSS 状态信息接口
+  async getOSSStatus(): Promise<ApiResponse<{ 
+    isConnected: boolean;
+    status: 'connected' | 'disconnected' | 'not_configured' | 'auth_error' | 'access_denied' | 'bucket_not_found' | 'time_error' | 'arrears' | 'error';
+    message: string;
+    errorCode?: string;
+    errorDetail?: string;
+  }>> {
     return this.request('/config/oss/status');
   }
 

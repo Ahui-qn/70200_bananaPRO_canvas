@@ -9,7 +9,8 @@
 import type { CanvasImage } from '../../../shared/types';
 
 // 加载状态类型
-export type LoadingState = 'placeholder' | 'thumbnail' | 'loading' | 'loaded';
+// 新增 'failed' 状态，用于标记加载失败的图片，避免无限重试
+export type LoadingState = 'placeholder' | 'thumbnail' | 'loading' | 'loaded' | 'failed';
 
 // 加载优先级
 export type LoadingPriority = 'high' | 'normal' | 'low';
@@ -26,6 +27,7 @@ interface LoadingTask {
   state: LoadingState;
   enterViewportTime?: number;  // 进入视口的时间戳
   loadStartTime?: number;      // 开始加载的时间戳
+  failCount: number;           // 加载失败次数（用于避免无限重试）
 }
 
 // 加载状态变化回调
@@ -39,6 +41,9 @@ const SCALE_THRESHOLD = 0.7;
 
 // 防抖延迟时间（毫秒）
 const DEBOUNCE_DELAY = 300;
+
+// 最大失败重试次数（超过后标记为 failed 状态，不再重试）
+const MAX_FAIL_COUNT = 2;
 
 // 优先级权重
 const PRIORITY_WEIGHTS: Record<LoadingPriority, number> = {
@@ -363,6 +368,7 @@ export class ImageLoadingManager {
           priority,
           state: 'loaded',
           enterViewportTime: Date.now(),
+          failCount: 0,
         };
         this.tasks.set(imageId, task);
         this.notifyStateChange(imageId, 'loaded');
@@ -375,6 +381,10 @@ export class ImageLoadingManager {
     if (existingTask) {
       // 如果已经加载完成，直接返回
       if (existingTask.state === 'loaded') {
+        return;
+      }
+      // 如果已经标记为失败，不再重试
+      if (existingTask.state === 'failed') {
         return;
       }
       // 如果正在加载，更新进入视口时间
@@ -423,6 +433,7 @@ export class ImageLoadingManager {
       priority,
       state: initialState,
       enterViewportTime: Date.now(),
+      failCount: 0,
     };
 
     this.tasks.set(imageId, task);
@@ -661,9 +672,20 @@ export class ImageLoadingManager {
         const imgIndex = this.getImageDisplayIndex(imageId);
         console.warn(`图片${imgIndex}：缩略图加载失败`, error);
         
-        // 如果任务还在 placeholder 状态，尝试直接加载原图
+        // 如果任务还在 placeholder 状态，增加失败计数
         const currentTask = this.tasks.get(imageId);
         if (currentTask && currentTask.state === 'placeholder') {
+          currentTask.failCount++;
+          
+          // 如果失败次数超过阈值，标记为失败状态
+          if (currentTask.failCount >= MAX_FAIL_COUNT) {
+            console.warn(`图片${imgIndex}：加载失败次数过多，停止重试`);
+            currentTask.state = 'failed';
+            this.notifyStateChange(imageId, 'failed');
+            return;
+          }
+          
+          // 尝试直接加载原图（如果当前应该显示原图）
           if (this.shouldLoadOriginal(this.currentScale)) {
             this.scheduleHighResLoad(imageId);
           }
@@ -695,7 +717,14 @@ export class ImageLoadingManager {
    */
   private startHighResLoad(imageId: string): void {
     const task = this.tasks.get(imageId);
-    if (!task || task.state === 'loading' || task.state === 'loaded') {
+    if (!task || task.state === 'loading' || task.state === 'loaded' || task.state === 'failed') {
+      return;
+    }
+
+    // 检查失败次数，超过阈值不再重试
+    if (task.failCount >= MAX_FAIL_COUNT) {
+      task.state = 'failed';
+      this.notifyStateChange(imageId, 'failed');
       return;
     }
 
@@ -790,10 +819,20 @@ export class ImageLoadingManager {
         
         const currentTask = this.tasks.get(imageId);
         if (currentTask) {
-          // 加载失败，回退到缩略图或占位符
-          currentTask.state = currentTask.thumbnailUrl ? 'thumbnail' : 'placeholder';
+          // 增加失败计数
+          currentTask.failCount++;
           this.loadingCount--;
-          this.notifyStateChange(imageId, currentTask.state);
+          
+          // 如果失败次数超过阈值，标记为失败状态，不再重试
+          if (currentTask.failCount >= MAX_FAIL_COUNT) {
+            console.warn(`图片${imgIndex}：加载失败次数过多，停止重试`);
+            currentTask.state = 'failed';
+            this.notifyStateChange(imageId, 'failed');
+          } else {
+            // 加载失败，回退到缩略图或占位符（但不触发重新加载）
+            currentTask.state = currentTask.thumbnailUrl ? 'thumbnail' : 'placeholder';
+            this.notifyStateChange(imageId, currentTask.state);
+          }
           
           // 处理队列中的下一个任务
           this.processQueue();
@@ -810,10 +849,13 @@ export class ImageLoadingManager {
     }
 
     // 找出等待加载的任务，按优先级排序
+    // 排除已加载、正在加载、已失败的任务
     const pendingTasks = Array.from(this.tasks.values())
       .filter(task => 
         task.state !== 'loading' && 
         task.state !== 'loaded' &&
+        task.state !== 'failed' &&
+        task.failCount < MAX_FAIL_COUNT &&
         task.enterViewportTime !== undefined
       )
       .sort((a, b) => {

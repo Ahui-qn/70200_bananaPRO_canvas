@@ -288,6 +288,11 @@ const CanvasImageItem: React.FC<{
       return null; // 返回 null，显示占位符
     }
     
+    // 如果加载失败，返回 null
+    if (loadingState === 'failed') {
+      return null;
+    }
+    
     // 策略：尝试获取最佳可用的 Blob URL
     // 1. 如果是缩略图模式，优先用缩略图
     // 2. 如果是原图模式，优先用原图，回退到缩略图
@@ -388,8 +393,22 @@ const CanvasImageItem: React.FC<{
       ) : (
         // 真实图片（支持渐进式加载）
         <>
-          {/* 加载占位符动画 - 当没有可显示的 Blob URL 时显示 */}
-          {!hasDisplayableImage && (
+          {/* 加载失败状态显示 */}
+          {loadingState === 'failed' && (
+            <div className="w-full h-full glass-card rounded-xl flex flex-col items-center justify-center gap-3 border border-orange-500/30 bg-orange-500/5">
+              <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
+                <X className="w-6 h-6 text-orange-400" />
+              </div>
+              <div className="text-center px-4">
+                <p className="text-sm text-orange-400 mb-1">图片加载失败</p>
+                <p className="text-xs text-zinc-500">请检查网络连接或存储服务状态</p>
+              </div>
+              <p className="text-xs text-zinc-500 max-w-[90%] truncate px-4">{image.prompt}</p>
+            </div>
+          )}
+          
+          {/* 加载占位符动画 - 当没有可显示的 Blob URL 且未失败时显示 */}
+          {!hasDisplayableImage && loadingState !== 'failed' && (
             <LoadingPlaceholder 
               width={imgWidth} 
               height={imgHeight} 
