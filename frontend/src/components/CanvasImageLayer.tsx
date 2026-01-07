@@ -164,7 +164,25 @@ const CanvasImageItem: React.FC<{
   useEffect(() => {
     if (!image.url) return;
 
-    // 将图片加入加载队列（内部会检查是否已存在）
+    // 检查是否已有缓存的 Blob URL（避免重复请求）
+    const hasCachedOriginal = !!imageLoadingManager.getBlobUrl(image.url);
+    const hasCachedThumbnail = image.thumbnailUrl ? !!imageLoadingManager.getBlobUrl(image.thumbnailUrl) : false;
+    
+    // 如果原图已缓存，直接设置为已加载状态
+    if (hasCachedOriginal) {
+      setLoadingState('loaded');
+      setIsHighResLoaded(true);
+      // 仍然需要注册任务（用于状态追踪），但不会触发网络请求
+      imageLoadingManager.queueImageLoad(image.id, image.url, image.thumbnailUrl);
+      return;
+    }
+    
+    // 如果缩略图已缓存，设置为缩略图状态
+    if (hasCachedThumbnail) {
+      setLoadingState('thumbnail');
+    }
+
+    // 将图片加入加载队列（内部会检查缓存，避免重复请求）
     imageLoadingManager.queueImageLoad(
       image.id,
       image.url,
@@ -205,7 +223,7 @@ const CanvasImageItem: React.FC<{
       if (checkInterval) {
         clearInterval(checkInterval);
       }
-      // 组件卸载时通知离开视口
+      // 组件卸载时通知离开视口（但不清除缓存）
       imageLoadingManager.imageLeftViewport(image.id);
     };
   }, [image.id]); // 只依赖 image.id，避免重复触发
@@ -227,32 +245,35 @@ const CanvasImageItem: React.FC<{
   }, [image.id, isGenerating, onDoubleClick]);
 
   // 获取当前应该显示的图片 URL
-  // 根据缩放比例动态选择图片源（缩小时使用缩略图，放大时使用原图）
+  // 优先使用缓存的 Blob URL，避免浏览器重复请求 OSS
   const displayUrl = useMemo(() => {
-    // 如果当前应该使用缩略图（缩放 < 0.5）
+    // 确定应该使用哪个原始 URL
+    let targetOriginalUrl: string;
+    
     if (currentSourceType === 'thumbnail') {
-      // 如果缩略图存在，使用缩略图
-      if (image.thumbnailUrl) {
-        return image.thumbnailUrl;
+      // 缩略图模式
+      targetOriginalUrl = image.thumbnailUrl || image.url;
+    } else {
+      // 原图模式
+      if (isHighResLoaded || loadingState === 'loaded') {
+        targetOriginalUrl = image.url;
+      } else if (image.thumbnailUrl && (loadingState === 'thumbnail' || loadingState === 'loading')) {
+        // 原图还在加载，先用缩略图
+        targetOriginalUrl = image.thumbnailUrl;
+      } else {
+        targetOriginalUrl = image.url;
       }
-      // 缩略图不存在，回退到原图
-      return image.url;
     }
     
-    // 当前应该使用原图（缩放 >= 0.5）
-    // 如果高清图已加载，使用原图
-    if (isHighResLoaded || loadingState === 'loaded') {
-      return image.url;
+    // 优先返回缓存的 Blob URL（关键：避免浏览器重复请求）
+    const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
+    if (cachedBlobUrl) {
+      return cachedBlobUrl;
     }
     
-    // 如果有缩略图且正在加载原图，先显示缩略图
-    if (image.thumbnailUrl && (loadingState === 'thumbnail' || loadingState === 'loading')) {
-      return image.thumbnailUrl;
-    }
-    
-    // 使用 imageLoadingManager 的智能选择
-    return imageLoadingManager.getImageUrl(image, scale);
-  }, [image, loadingState, isHighResLoaded, currentSourceType, scale]);
+    // 没有缓存，返回原始 URL（会触发 fetch 并缓存）
+    return targetOriginalUrl;
+  }, [image.url, image.thumbnailUrl, loadingState, isHighResLoaded, currentSourceType]);
 
   return (
     <div
