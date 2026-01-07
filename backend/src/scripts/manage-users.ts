@@ -230,6 +230,39 @@ async function setUserRole(args: Record<string, string>): Promise<void> {
 }
 
 /**
+ * 重置用户密码
+ */
+async function resetPassword(args: Record<string, string>): Promise<void> {
+  const { username, password } = args;
+
+  if (!username) {
+    console.error('❌ 缺少用户名参数');
+    console.log('用法: npm run user:reset-password -- --username=用户名 --password=新密码');
+    process.exit(1);
+  }
+
+  if (!password) {
+    console.error('❌ 缺少密码参数');
+    console.log('用法: npm run user:reset-password -- --username=用户名 --password=新密码');
+    process.exit(1);
+  }
+
+  try {
+    const user = await userService.getUserByUsername(username);
+    if (!user) {
+      console.error(`❌ 用户不存在: ${username}`);
+      process.exit(1);
+    }
+
+    await userService.resetPassword(user.id, password);
+    console.log(`✅ 用户密码已重置: ${username}`);
+  } catch (error: any) {
+    console.error('❌ 重置密码失败:', error.message);
+    process.exit(1);
+  }
+}
+
+/**
  * 显示帮助信息
  */
 function showHelp(): void {
@@ -242,13 +275,15 @@ function showHelp(): void {
   npm run user:disable -- --username=用户名
   npm run user:enable -- --username=用户名
   npm run user:set-role -- --username=用户名 --role=角色
+  npm run user:reset-password -- --username=用户名 --password=新密码
 
 命令:
-  create      创建新用户
-  list        列出所有用户
-  disable     禁用用户
-  enable      启用用户
-  set-role    修改用户角色
+  create          创建新用户
+  list            列出所有用户
+  disable         禁用用户
+  enable          启用用户
+  set-role        修改用户角色
+  reset-password  重置用户密码
 
 参数:
   --username    用户名（登录时使用）
@@ -261,6 +296,7 @@ function showHelp(): void {
   npm run user:list
   npm run user:disable -- --username=zhangsan
   npm run user:set-role -- --username=admin --role=admin
+  npm run user:reset-password -- --username=zhangsan --password=newpass123
 `);
 }
 
@@ -300,6 +336,9 @@ async function main(): Promise<void> {
         break;
       case 'set-role':
         await setUserRole(args);
+        break;
+      case 'reset-password':
+        await resetPassword(args);
         break;
       default:
         console.error(`❌ 未知命令: ${command}`);

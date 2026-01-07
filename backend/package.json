@@ -12,6 +12,7 @@
     "user:disable": "tsx src/scripts/manage-users.ts disable",
     "user:enable": "tsx src/scripts/manage-users.ts enable",
     "user:set-role": "tsx src/scripts/manage-users.ts set-role",
+    "user:reset-password": "tsx src/scripts/manage-users.ts reset-password",
     "update:dimensions": "tsx src/scripts/update-image-dimensions.ts",
     "cleanup:all": "tsx src/scripts/cleanup-all-data.ts --force",
     "cleanup:database": "tsx src/scripts/cleanup-database-only.ts",

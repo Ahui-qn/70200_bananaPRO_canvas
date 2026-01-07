@@ -41,7 +41,16 @@ class NanoBananaService {
       console.log('创建任务响应:', data);
       
       if (data.code !== 0) {
-        throw new Error(data.msg || '创建任务失败');
+        // 将常见的英文错误信息翻译为中文
+        let errorMsg = data.msg || '创建任务失败';
+        if (errorMsg.includes('apikey credits not enough')) {
+          errorMsg = 'API 额度不足，请充值后重试';
+        } else if (errorMsg.includes('invalid apikey')) {
+          errorMsg = 'API Key 无效，请检查配置';
+        } else if (errorMsg.includes('rate limit')) {
+          errorMsg = '请求频率过高，请稍后重试';
+        }
+        throw new Error(errorMsg);
       }
 
       return data.data.id;

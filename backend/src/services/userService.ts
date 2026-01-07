@@ -50,6 +50,9 @@ export interface UserService {
   
   // 更新用户角色
   updateUserRole(userId: string, role: UserRole): Promise<void>;
+  
+  // 重置用户密码
+  resetPassword(userId: string, newPassword: string): Promise<void>;
 }
 
 /**
@@ -378,6 +381,39 @@ export class UserServiceImpl implements UserService {
     }
 
     console.log(`用户角色已更新: ${userId} -> ${role}`);
+  }
+
+  /**
+   * 重置用户密码
+   * 
+   * @param userId 用户 ID
+   * @param newPassword 新密码（明文）
+   */
+  async resetPassword(userId: string, newPassword: string): Promise<void> {
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('密码长度不能少于6位');
+    }
+
+    const connection = databaseService.getConnection();
+    if (!connection) {
+      throw new Error('数据库未连接');
+    }
+
+    // 使用 bcrypt 加密新密码
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
+    const sql = `
+      UPDATE ${TABLE_NAMES.USERS} 
+      SET password_hash = ?, updated_at = ? 
+      WHERE id = ?
+    `;
+    const [result] = await connection.execute(sql, [passwordHash, new Date(), userId]);
+    
+    if ((result as any).affectedRows === 0) {
+      throw new Error('用户不存在');
+    }
+
+    console.log(`用户密码已重置: ${userId}`);
   }
 }
 

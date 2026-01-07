@@ -1519,18 +1519,23 @@ function CanvasApp() {
           
           completedCount++;
           setGenerationProgress((completedCount / totalCount) * 100);
-          return { success: false };
+          return { success: false, error: failureReason };
         })
       );
 
       const results = await Promise.all(generatePromises);
       
-      // 检查是否有失败的生成
-      const failedCount = results.filter(r => !r.success).length;
-      if (failedCount > 0 && failedCount < totalCount) {
-        setGenerationError(`${failedCount} 张图片生成失败`);
-      } else if (failedCount === totalCount) {
-        setGenerationError('所有图片生成失败');
+      // 检查是否有失败的生成，并收集错误信息
+      const failedResults = results.filter(r => !r.success);
+      const failedCount = failedResults.length;
+      if (failedCount > 0) {
+        // 获取第一个失败的错误原因（通常所有失败原因相同）
+        const firstError = (failedResults[0] as any)?.error || '';
+        if (failedCount < totalCount) {
+          setGenerationError(`${failedCount} 张图片生成失败${firstError ? `：${firstError}` : ''}`);
+        } else {
+          setGenerationError(`所有图片生成失败${firstError ? `：${firstError}` : ''}`);
+        }
       }
       
       setStatus(AppStatus.SUCCESS);
