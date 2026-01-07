@@ -250,13 +250,18 @@ const CanvasImageItem: React.FC<{
   }, [image.id, isGenerating, onDoubleClick]);
 
   // 获取当前应该显示的图片 URL
-  // 优先使用缓存的 Blob URL，避免浏览器重复请求 OSS
+  // 关键：只使用 Blob URL，避免 <img> 标签直接请求 OSS
   const displayUrl = useMemo(() => {
+    // 安全检查：确保 getBlobUrl 方法存在
+    if (typeof imageLoadingManager.getBlobUrl !== 'function') {
+      return null; // 返回 null，显示占位符
+    }
+    
     // 确定应该使用哪个原始 URL
     let targetOriginalUrl: string;
     
     if (currentSourceType === 'thumbnail') {
-      // 缩略图模式
+      // 缩略图模式：优先使用缩略图
       targetOriginalUrl = image.thumbnailUrl || image.url;
     } else {
       // 原图模式
@@ -270,18 +275,14 @@ const CanvasImageItem: React.FC<{
       }
     }
     
-    // 优先返回缓存的 Blob URL（关键：避免浏览器重复请求）
-    // 安全检查：确保 getBlobUrl 方法存在
-    if (typeof imageLoadingManager.getBlobUrl === 'function') {
-      const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
-      if (cachedBlobUrl) {
-        return cachedBlobUrl;
-      }
-    }
-    
-    // 没有缓存，返回原始 URL（会触发 fetch 并缓存）
-    return targetOriginalUrl;
+    // 只返回缓存的 Blob URL，不返回原始 OSS URL
+    // 这样 <img> 标签就不会直接请求 OSS
+    const cachedBlobUrl = imageLoadingManager.getBlobUrl(targetOriginalUrl);
+    return cachedBlobUrl || null;
   }, [image.url, image.thumbnailUrl, loadingState, isHighResLoaded, currentSourceType]);
+  
+  // 是否有可显示的图片（Blob URL 已缓存）
+  const hasDisplayableImage = displayUrl !== null;
 
   return (
     <div
@@ -356,8 +357,8 @@ const CanvasImageItem: React.FC<{
       ) : (
         // 真实图片（支持渐进式加载）
         <>
-          {/* 加载占位符动画（需求 5.1, 13.1） */}
-          {loadingState === 'placeholder' && !isHighResLoaded && (
+          {/* 加载占位符动画 - 当没有可显示的 Blob URL 时显示 */}
+          {!hasDisplayableImage && (
             <LoadingPlaceholder 
               width={imgWidth} 
               height={imgHeight} 
@@ -365,25 +366,15 @@ const CanvasImageItem: React.FC<{
             />
           )}
           
-          {/* 图片（带淡入动画） */}
-          <img
-            src={displayUrl}
-            alt={image.prompt}
-            className={`w-full h-full object-cover rounded-xl shadow-2xl shadow-black/50 transition-opacity duration-500 ${
-              isHighResLoaded || loadingState === 'thumbnail' || loadingState === 'loaded' ? 'opacity-100' : 'opacity-0'
-            }`}
-            draggable={false}
-            loading="lazy"
-            onLoad={() => {
-              // 当图片加载完成时更新状态
-              if (displayUrl === image.url) {
-                setIsHighResLoaded(true);
-                setLoadingState('loaded');
-              } else if (displayUrl === image.thumbnailUrl) {
-                setLoadingState('thumbnail');
-              }
-            }}
-          />
+          {/* 图片 - 只在有 Blob URL 时渲染，避免直接请求 OSS */}
+          {hasDisplayableImage && (
+            <img
+              src={displayUrl}
+              alt={image.prompt}
+              className="w-full h-full object-cover rounded-xl shadow-2xl shadow-black/50 transition-opacity duration-300 opacity-100"
+              draggable={false}
+            />
+          )}
           
           {/* 尺寸信息标签 - 左上角 */}
           <div className="absolute -top-2 -left-2 px-2 py-1 bg-black/80 text-white text-xs rounded-md border border-white/20 shadow-lg">
