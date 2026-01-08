@@ -21,6 +21,7 @@
     "check:db": "tsx src/scripts/check-database-status.ts"
   },
   "dependencies": {
+    "@types/multer": "^2.0.0",
     "ali-oss": "^6.23.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.5.0",
@@ -30,6 +31,7 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
     "mysql2": "^3.16.0",
     "sharp": "^0.34.5",
     "uuid": "^13.0.0"

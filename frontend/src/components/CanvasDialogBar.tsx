@@ -778,39 +778,6 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
         </div>
       )}
 
-      {/* 生成进度显示区域 - 显示在对话框上方（需求 9.2） */}
-      {isGenerating && (
-        <div className="mb-2 pl-14 pr-14 animate-fade-in">
-          <div className="flex items-center gap-3 px-3 py-2 glass-card" style={{ borderRadius: '9999px' }}>
-            <Loader2 className="w-4 h-4 text-violet-400 animate-spin-smooth flex-shrink-0" />
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-zinc-400 animate-pulse-soft">
-                  {generationStatus || '正在生成图片...'}
-                </span>
-              </div>
-              <div className="w-full h-1.5 bg-zinc-700/50 rounded-full overflow-hidden">
-                <div 
-                  className="h-full progress-animated rounded-full"
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
-            {/* 取消按钮 - 暂时隐藏，保留代码以备后续其他模型使用
-            {onCancel && (
-              <button
-                type="button"
-                onClick={onCancel}
-                className="text-xs text-zinc-500 hover:text-red-400 transition-colors duration-150 flex-shrink-0"
-              >
-                取消
-              </button>
-            )}
-            */}
-          </div>
-        </div>
-      )}
-
       {/* 参考图预览区域 - 显示在对话框上方，与对话框左对齐 */}
       <div className="pl-14"> {/* 与模式切换按钮宽度 + gap 对齐 */}
         <RefImagePreview

@@ -884,7 +884,7 @@ export class DatabaseServiceImpl implements DatabaseService {
     return {
       apiKey: config.apiKey.trim(),
       baseUrl: config.baseUrl.trim().replace(/\/$/, ''), // 移除末尾斜杠
-      timeout: Math.max(1000, Math.min(300000, config.timeout)), // 限制在 1s-5min 之间
+      timeout: Math.max(1000, Math.min(450000, config.timeout)), // 限制在 1s-7.5min 之间
       retryCount: Math.max(0, Math.min(10, config.retryCount)), // 限制在 0-10 之间
       provider: config.provider.trim()
     };

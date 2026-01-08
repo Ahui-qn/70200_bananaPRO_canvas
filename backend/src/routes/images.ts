@@ -1,9 +1,81 @@
 import express from 'express';
+import multer from 'multer';
 import { ApiResponse, PaginatedResponse, SavedImage, GetImagesRequest, CreateImageRequest, UpdateImageRequest } from '@shared/types';
 import { databaseManager } from '../services/databaseManager.js';
 import { trashService } from '../services/trashService.js';
+import { storageManager } from '../services/storageManager.js';
 
 const router = express.Router();
+
+// 配置 multer 用于处理文件上传
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 20 * 1024 * 1024, // 最大 20MB
+  },
+  fileFilter: (_req, file, cb) => {
+    // 只允许图片文件
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('只允许上传图片文件'));
+    }
+  },
+});
+
+/**
+ * POST /api/images/upload
+ * 上传图片文件到存储（支持本地和 OSS）
+ * 用于图片编辑器保存编辑后的图片
+ */
+router.post('/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      const response: ApiResponse = {
+        success: false,
+        error: '没有上传文件',
+      };
+      return res.status(400).json(response);
+    }
+
+    const buffer = req.file.buffer;
+    const contentType = req.file.mimetype;
+
+    // 上传原图
+    const uploadResult = await storageManager.uploadFromBuffer(buffer, contentType);
+
+    // 生成并上传缩略图
+    let thumbnailUrl = '';
+    try {
+      const thumbnailBuffer = await storageManager.generateThumbnail(buffer);
+      const thumbnailResult = await storageManager.uploadThumbnail(thumbnailBuffer, uploadResult.key);
+      thumbnailUrl = thumbnailResult.url;
+    } catch (thumbError) {
+      console.warn('生成缩略图失败:', thumbError);
+      // 缩略图失败不影响主流程
+    }
+
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        url: uploadResult.url,
+        thumbnailUrl,
+        key: uploadResult.key,
+        size: uploadResult.size,
+      },
+      message: '图片上传成功',
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('上传图片失败:', error);
+    const response: ApiResponse = {
+      success: false,
+      error: error.message || '上传图片失败',
+    };
+    res.status(500).json(response);
+  }
+});
 
 // 获取图片列表
 router.get('/', async (req, res) => {
@@ -76,16 +148,16 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// 创建新图片
+// 创建新图片（支持直接传入 URL，用于编辑后的图片保存）
 router.post('/', async (req, res) => {
   try {
-    const imageData: CreateImageRequest = req.body;
+    const imageData = req.body;
     
-    // 验证必填字段
-    if (!imageData.prompt || !imageData.model) {
+    // 验证必填字段（编辑后的图片需要 url，生成的图片需要 prompt 和 model）
+    if (!imageData.url && (!imageData.prompt || !imageData.model)) {
       const response: ApiResponse = {
         success: false,
-        error: '缺少必填字段：prompt 和 model'
+        error: '缺少必填字段：需要 url 或 (prompt 和 model)'
       };
       return res.status(400).json(response);
     }
@@ -93,17 +165,21 @@ router.post('/', async (req, res) => {
     // 创建图片记录
     const savedImage: SavedImage = {
       id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      url: '', // 将由 AI 生成后更新
-      prompt: imageData.prompt,
-      model: imageData.model,
+      url: imageData.url || '', // 编辑后的图片直接传入 URL
+      thumbnailUrl: imageData.thumbnailUrl,
+      prompt: imageData.prompt || '',
+      model: imageData.model || 'edited',
       aspectRatio: imageData.aspectRatio || 'auto',
       imageSize: imageData.imageSize || '1K',
-      // refImages 在创建时不需要存储完整的 UploadedImage 对象
-      // 实际的参考图数据会在生成时处理
+      projectId: imageData.projectId,
+      canvasX: imageData.canvasX,
+      canvasY: imageData.canvasY,
+      width: imageData.width,
+      height: imageData.height,
       refImages: undefined,
       createdAt: new Date(),
       favorite: false,
-      ossUploaded: false
+      ossUploaded: !!imageData.url, // 如果有 URL 说明已上传
     };
 
     const result = await databaseManager.saveImage(savedImage);

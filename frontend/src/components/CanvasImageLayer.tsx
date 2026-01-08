@@ -20,6 +20,7 @@ import {
   Loader2,
   RefreshCw,
   ImagePlus,
+  Pencil,
 } from 'lucide-react';
 
 // 默认图片尺寸（当数据库中没有尺寸数据时使用）
@@ -53,6 +54,8 @@ interface CanvasImageLayerProps {
   onRegenerateImage?: (image: CanvasImage) => void;
   // 添加为参考图
   onAddAsReferenceImage?: (image: CanvasImage) => void;
+  // 编辑图片
+  onEditImage?: (image: CanvasImage) => void;
 }
 
 /**
@@ -120,6 +123,7 @@ const CanvasImageItem: React.FC<{
   onShare?: () => void;
   onRegenerate?: () => void;  // 重新生成回调
   onAddAsReference?: () => void;  // 添加为参考图回调
+  onEdit?: () => void;  // 编辑图片回调
 }> = ({
   image,
   isSelected,
@@ -133,6 +137,7 @@ const CanvasImageItem: React.FC<{
   onShare,
   onRegenerate,
   onAddAsReference,
+  onEdit,
 }) => {
   // 优先使用运行时位置（x），因为它可能被用户拖动更新
   const imgX = image.x ?? image.canvasX ?? 0;
@@ -141,8 +146,13 @@ const CanvasImageItem: React.FC<{
   // 使用按比例计算的显示尺寸
   const { width: imgWidth, height: imgHeight } = getCanvasDisplaySize(image);
   
-  // 获取实际尺寸用于显示信息
+  // 获取实际尺寸用于显示信息（取整）
   const { width: actualWidth, height: actualHeight } = getImageDimensions(image);
+  const displayActualWidth = Math.round(actualWidth);
+  const displayActualHeight = Math.round(actualHeight);
+
+  // 判断是否为编辑过的图片
+  const isEdited = image.model === 'edited';
 
   // 加载状态
   const [loadingState, setLoadingState] = useState<LoadingState>(
@@ -333,6 +343,8 @@ const CanvasImageItem: React.FC<{
         width: imgWidth,
         height: imgHeight,
         willChange: isDragging ? 'transform' : 'auto',
+        // 编辑过的图片添加左边框
+        borderLeft: isEdited ? '3px solid rgba(168, 85, 247, 0.6)' : 'none',
       }}
       onMouseDown={onMouseDown}
       onDoubleClick={(e) => {
@@ -429,12 +441,25 @@ const CanvasImageItem: React.FC<{
           
           {/* 尺寸信息标签 - 左上角 */}
           <div className="absolute -top-2 -left-2 px-2 py-1 bg-black/80 text-white text-xs rounded-md border border-white/20 shadow-lg">
-            {actualWidth} × {actualHeight}
+            {displayActualWidth} × {displayActualHeight}
           </div>
           
           {/* 操作按钮 */}
           <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            {/* 添加为参考图按钮 - 位于最左侧 */}
+            {/* 编辑按钮 - 位于最左侧 */}
+            {onEdit && (
+              <button
+                className="btn-glass p-2 rounded-lg hover:bg-violet-500/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+                title="编辑图片"
+              >
+                <Pencil className="w-3.5 h-3.5 text-violet-400" />
+              </button>
+            )}
+            {/* 添加为参考图按钮 */}
             {onAddAsReference && (
               <button
                 className="btn-glass p-2 rounded-lg hover:bg-emerald-500/20"
@@ -447,7 +472,8 @@ const CanvasImageItem: React.FC<{
                 <ImagePlus className="w-3.5 h-3.5 text-emerald-400" />
               </button>
             )}
-            {onRegenerate && (
+            {/* 重新生成按钮 - 编辑过的图片不显示 */}
+            {onRegenerate && !isEdited && (
               <button
                 className="btn-glass p-2 rounded-lg hover:bg-violet-500/20"
                 onClick={(e) => {
@@ -610,6 +636,7 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
   onShareImage,
   onRegenerateImage,
   onAddAsReferenceImage,
+  onEditImage,
 }) => {
   // 当前缩放比例
   const scale = viewport.scale;
@@ -698,6 +725,7 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
           onShare={() => handleShare(img)}
           onRegenerate={onRegenerateImage ? () => onRegenerateImage(img) : undefined}
           onAddAsReference={onAddAsReferenceImage ? () => onAddAsReferenceImage(img) : undefined}
+          onEdit={onEditImage ? () => onEditImage(img) : undefined}
         />
       ))}
     </>

@@ -16,7 +16,7 @@ function getApiConfigFromEnv() {
   return {
     apiKey: process.env.NANO_BANANA_API_KEY || '',
     baseUrl: process.env.NANO_BANANA_API_URL || 'https://grsai.dakka.com.cn',
-    timeout: 300000,
+    timeout: 450000,  // 450秒超时
     retryCount: 3,
     provider: 'Nano Banana AI'
   };

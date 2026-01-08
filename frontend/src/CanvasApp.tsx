@@ -18,6 +18,7 @@ import { ImageLibraryPage } from './components/ImageLibraryPage';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { CanvasZoomControl } from './components/CanvasZoomControl';
 import { CanvasDialogBar } from './components/CanvasDialogBar';
+import { ImageEditor } from './components/ImageEditor';
 import { useAuth, getAuthToken } from './contexts/AuthContext';
 import { ProjectProvider, useProject } from './contexts/ProjectContext';
 import ProjectSwitcher from './components/ProjectSwitcher';
@@ -86,7 +87,7 @@ const DEFAULT_SETTINGS: GenerationSettings = {
 const DEFAULT_API_CONFIG: ApiConfig = {
   apiKey: '',
   baseUrl: 'https://grsai.dakka.com.cn/v1/draw',
-  timeout: 300000,
+  timeout: 450000,  // 450秒超时
   retryCount: 3,
   provider: 'Nano Banana',
 };
@@ -108,6 +109,9 @@ function CanvasApp() {
   const [showImageLibrary, setShowImageLibrary] = useState(false);
   const [showTrashBin, setShowTrashBin] = useState(false);
   const [previewImage, setPreviewImage] = useState<CanvasImageType | null>(null);
+  
+  // 图片编辑器状态
+  const [editingImage, setEditingImage] = useState<CanvasImageType | null>(null);
 
   // 连接状态
   const [backendConnected, setBackendConnected] = useState(false);
@@ -565,6 +569,139 @@ function CanvasApp() {
 
     // 显示成功提示（需求 3.1）
     setToastMessage('已添加为参考图');
+    setToastType('success');
+    setShowToast(true);
+  }, [settings.refImages]);
+
+  /**
+   * 编辑图片 - 打开图片编辑器
+   */
+  const handleEditImage = useCallback((image: CanvasImageType) => {
+    setEditingImage(image);
+  }, []);
+
+  /**
+   * 保存编辑后的图片
+   * 将编辑后的图片保存到存储，并在原图旁边创建新图片
+   */
+  const handleSaveEditedImage = useCallback(async (data: {
+    blob: Blob;
+    width: number;
+    height: number;
+    originalImage: CanvasImageType;
+  }) => {
+    const { blob, width, height, originalImage } = data;
+    
+    try {
+      // 1. 上传图片到存储
+      const formData = new FormData();
+      formData.append('image', blob, `edited-${Date.now()}.png`);
+      
+      const token = getAuthToken();
+      const uploadResponse = await fetch('/api/images/upload', {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
+      
+      if (!uploadResponse.ok) {
+        throw new Error('上传图片失败');
+      }
+      
+      const uploadResult = await uploadResponse.json();
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || '上传图片失败');
+      }
+      
+      const imageUrl = uploadResult.data.url;
+      const thumbnailUrl = uploadResult.data.thumbnailUrl;
+      
+      // 2. 计算新图片位置（在原图右侧，间距 8px，更贴近原图）
+      const originalX = (originalImage as any).x ?? originalImage.canvasX ?? 0;
+      const originalY = (originalImage as any).y ?? originalImage.canvasY ?? 0;
+      const originalWidth = originalImage.width || 400;
+      
+      // 计算画布显示尺寸
+      const displaySize = calculateCanvasDisplaySize(width, height);
+      const newX = Math.round(originalX + originalWidth + 8);  // 间距从 20px 减少到 8px
+      const newY = Math.round(originalY);  // 取整
+      
+      // 3. 保存图片记录到数据库（标记为编辑过的图片）
+      const saveResponse = await fetch('/api/images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          url: imageUrl,
+          thumbnailUrl,
+          prompt: originalImage.prompt || '',  // 保留原图的 prompt，不添加前缀
+          model: 'edited',  // 标记为编辑过的图片
+          aspectRatio: originalImage.aspectRatio || 'auto',
+          imageSize: originalImage.imageSize || '1K',
+          projectId: currentProject?.id,
+          canvasX: newX,
+          canvasY: newY,
+          width: Math.round(width),  // 取整
+          height: Math.round(height),  // 取整
+        }),
+      });
+      
+      if (!saveResponse.ok) {
+        throw new Error('保存图片记录失败');
+      }
+      
+      // 4. 刷新项目图片列表
+      if (currentProject?.id) {
+        await savePendingPositions();
+        await loadProjectImages(currentProject.id);
+      }
+      
+      // 5. 显示成功提示
+      setToastMessage('编辑后的图片已保存');
+      setToastType('success');
+      setShowToast(true);
+      
+    } catch (error: any) {
+      console.error('保存编辑图片失败:', error);
+      setToastMessage(error.message || '保存失败');
+      setToastType('error');
+      setShowToast(true);
+      throw error;
+    }
+  }, [currentProject?.id, savePendingPositions, loadProjectImages]);
+
+  /**
+   * 保存编辑后的图片并设为参考图
+   */
+  const handleSetEditedAsReference = useCallback((imageUrl: string) => {
+    // 将编辑后的图片添加到参考图列表
+    const currentRefImages = settings.refImages || [];
+    const MAX_REF_IMAGES = 4;
+    
+    if (currentRefImages.length >= MAX_REF_IMAGES) {
+      setToastMessage(`参考图数量已达上限（最多 ${MAX_REF_IMAGES} 张）`);
+      setToastType('warning');
+      setShowToast(true);
+      return;
+    }
+    
+    const newRefImage: UploadedImage = {
+      id: `ref-edited-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      file: new File([], 'edited-image.png'),
+      base64: undefined,
+      preview: imageUrl,
+      name: `编辑图片-${currentRefImages.length + 1}`,
+      size: 0,
+    };
+    
+    const updatedRefImages = [...currentRefImages, newRefImage];
+    setSettings((prev) => ({ ...prev, refImages: updatedRefImages }));
+    
+    setToastMessage('已保存并添加为参考图');
     setToastType('success');
     setShowToast(true);
   }, [settings.refImages]);
@@ -1760,6 +1897,7 @@ function CanvasApp() {
                     onDeleteImage={(imageId) => handleDeleteImage(imageId)}
                     onRegenerateImage={handleRegenerateImage}
                     onAddAsReferenceImage={handleAddAsReferenceImage}
+                    onEditImage={handleEditImage}
                   />
                 )}
                 
@@ -2009,6 +2147,16 @@ function CanvasApp() {
           navigator.clipboard.writeText(image.url);
         }}
       />
+
+      {/* 图片编辑器 */}
+      {editingImage && (
+        <ImageEditor
+          image={editingImage}
+          onClose={() => setEditingImage(null)}
+          onSave={handleSaveEditedImage}
+          onSetAsReference={handleSetEditedAsReference}
+        />
+      )}
 
       {/* Toast 提示组件 */}
       {showToast && (
