@@ -4,12 +4,11 @@ import {
   Video,
   MessageCircle,
   Plus,
-  Send,
   Menu,
   X,
   Check,
   Loader2,
-  Square,
+  CornerDownLeft,
 } from 'lucide-react';
 import { GenerationSettings, UploadedImage } from '../../../shared/types';
 import { ConfigPanel } from './ConfigPanel';
@@ -476,6 +475,8 @@ interface CanvasDialogBarProps {
   // 生成数量
   generateCount?: number;
   onGenerateCountChange?: (count: number) => void;
+  
+  // 撤回/重做功能已移除 UI，只通过键盘快捷键控制（Ctrl+Z / Ctrl+Shift+Z）
 }
 
 export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
@@ -887,18 +888,19 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
           type="button"
           onClick={handleGenerate}
           disabled={(!prompt.trim() && !isGenerating) || isGenerating}
-          className={`w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200
+          className={`h-11 px-4 rounded-full flex items-center justify-center gap-1.5 transition-all duration-200
             touch-target active:scale-95 btn-generate flex-shrink-0
             bg-gradient-to-br from-violet-500 to-indigo-600 hover:from-violet-400 hover:to-indigo-500 hover:shadow-xl hover:shadow-violet-500/30
             ${(!prompt.trim() || isGenerating) ? 'opacity-50 cursor-not-allowed' : ''}
             shadow-lg shadow-violet-500/20`}
-          title={isGenerating ? '生成中...' : '生成图片'}
+          title={isGenerating ? '生成中...' : '生成图片 (Enter)'}
         >
           {isGenerating ? (
-            <Loader2 className="w-5 h-5 text-white animate-spin" />
+            <Loader2 className="w-4 h-4 text-white animate-spin" />
           ) : (
-            <Send className="w-5 h-5 text-white" />
+            <CornerDownLeft className="w-4 h-4 text-white/90" />
           )}
+          <span className="text-sm font-medium text-white">生成</span>
         </button>
         
         {/* 停止生成按钮 - 暂时隐藏，保留代码以备后续其他模型使用

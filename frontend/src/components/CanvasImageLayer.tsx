@@ -5,6 +5,7 @@
  * 根据缩放比例动态选择缩略图或原图
  * 
  * 需求: 1.3, 2.1, 3.1, 4.1, 4.2, 5.1, 5.2, 5.3
+ * 图片选中状态重新设计需求: 1.1-1.5, 2.1-2.5, 3.1-3.5, 4.1-4.6, 5.1-5.4, 6.1-6.5
  */
 
 import React, { useMemo, useCallback, useEffect, useState } from 'react';
@@ -26,6 +27,451 @@ import {
 // 默认图片尺寸（当数据库中没有尺寸数据时使用）
 const DEFAULT_IMAGE_WIDTH = 400;
 const DEFAULT_IMAGE_HEIGHT = 400;
+
+// ============================================
+// 图片类型和颜色映射（需求 1.1, 1.2, 1.3）
+// ============================================
+
+/**
+ * 图片类型定义
+ * - generated: AI 生成的图片
+ * - edited: 编辑过的图片
+ * - uploaded: 用户上传的图片
+ */
+export type ImageType = 'generated' | 'edited' | 'uploaded';
+
+/**
+ * 四角指示器颜色映射
+ * - generated: 纯白色
+ * - edited: 黄色 (Tailwind yellow-400)
+ * - uploaded: 蓝色 (Tailwind blue-500)
+ */
+export const CORNER_COLORS: Record<ImageType, string> = {
+  generated: '#FFFFFF',
+  edited: '#FACC15',
+  uploaded: '#3B82F6',
+} as const;
+
+/**
+ * 动画配置常量
+ */
+export const ANIMATION_CONFIG = {
+  duration: 250,         // 动画时长 (ms)
+  easing: 'ease-out',    // 缓动函数
+  cornerSize: 20,        // 角落线条长度 (px)
+  cornerThickness: 3,    // 角落线条粗细 (px)
+  expandOffset: 8,       // 动画起始偏移量 (px)
+} as const;
+
+/**
+ * 获取图片类型
+ * 根据 model 字段判断图片类型
+ * 
+ * @param image 画布图片对象
+ * @returns 图片类型
+ */
+export const getImageType = (image: CanvasImage): ImageType => {
+  if (image.model === 'edited') return 'edited';
+  if (image.model === 'uploaded') return 'uploaded';
+  return 'generated';
+};
+
+/**
+ * 获取图片类型对应的颜色
+ * 
+ * @param image 画布图片对象
+ * @returns 颜色值（十六进制）
+ */
+export const getCornerColor = (image: CanvasImage): string => {
+  const imageType = getImageType(image);
+  return CORNER_COLORS[imageType];
+};
+
+/**
+ * 格式化尺寸显示
+ * 
+ * @param width 宽度
+ * @param height 高度
+ * @returns 格式化的字符串 "宽度 × 高度"
+ */
+export const formatDimensions = (width: number, height: number): string => {
+  return `${Math.round(width)} × ${Math.round(height)}`;
+};
+
+/**
+ * 判断是否应该显示重新生成按钮
+ * 编辑过的图片和上传的图片不显示重新生成按钮
+ * 
+ * @param image 画布图片对象
+ * @returns 是否显示重新生成按钮
+ */
+export const shouldShowRegenerateButton = (image: CanvasImage): boolean => {
+  const imageType = getImageType(image);
+  return imageType === 'generated';
+};
+
+// ============================================
+// SelectionCorners 组件（需求 1.1-1.5, 2.1-2.5）
+// ============================================
+
+interface SelectionCornersProps {
+  isSelected: boolean;           // 是否被选中
+  imageType: ImageType;          // 图片类型
+  width: number;                 // 图片宽度
+  height: number;                // 图片高度
+}
+
+/**
+ * 四角 L 形选中指示器组件
+ * 支持聚焦动画效果
+ * 
+ * 需求: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5
+ */
+const SelectionCorners: React.FC<SelectionCornersProps> = ({
+  isSelected,
+  imageType,
+  width,
+  height,
+}) => {
+  // 动画状态：entering（进入）、visible（可见）、exiting（退出）、hidden（隐藏）
+  const [animationState, setAnimationState] = useState<'entering' | 'visible' | 'exiting' | 'hidden'>(
+    isSelected ? 'visible' : 'hidden'
+  );
+
+  // 监听选中状态变化，触发动画
+  useEffect(() => {
+    if (isSelected) {
+      setAnimationState('entering');
+      const timer = setTimeout(() => {
+        setAnimationState('visible');
+      }, ANIMATION_CONFIG.duration);
+      return () => clearTimeout(timer);
+    } else {
+      if (animationState !== 'hidden') {
+        setAnimationState('exiting');
+        const timer = setTimeout(() => {
+          setAnimationState('hidden');
+        }, ANIMATION_CONFIG.duration);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isSelected]);
+
+  // 如果完全隐藏，不渲染
+  if (animationState === 'hidden') {
+    return null;
+  }
+
+  const color = CORNER_COLORS[imageType];
+  const { cornerSize, cornerThickness } = ANIMATION_CONFIG;
+
+  // 动画类名
+  const animationClass = animationState === 'entering' 
+    ? 'selection-corners-entering' 
+    : animationState === 'exiting' 
+      ? 'selection-corners-exiting' 
+      : '';
+
+  return (
+    <div 
+      className={`absolute inset-0 pointer-events-none ${animationClass}`}
+      style={{ 
+        color,
+        // 动画时添加 will-change 优化
+        willChange: animationState === 'entering' || animationState === 'exiting' ? 'transform, opacity' : 'auto',
+      }}
+    >
+      {/* 左上角 */}
+      <div 
+        className="absolute selection-corner corner-tl"
+        style={{
+          top: -cornerThickness,
+          left: -cornerThickness,
+          width: cornerSize,
+          height: cornerSize,
+        }}
+      />
+      
+      {/* 右上角 */}
+      <div 
+        className="absolute selection-corner corner-tr"
+        style={{
+          top: -cornerThickness,
+          right: -cornerThickness,
+          width: cornerSize,
+          height: cornerSize,
+        }}
+      />
+      
+      {/* 左下角 */}
+      <div 
+        className="absolute selection-corner corner-bl"
+        style={{
+          bottom: -cornerThickness,
+          left: -cornerThickness,
+          width: cornerSize,
+          height: cornerSize,
+        }}
+      />
+      
+      {/* 右下角 */}
+      <div 
+        className="absolute selection-corner corner-br"
+        style={{
+          bottom: -cornerThickness,
+          right: -cornerThickness,
+          width: cornerSize,
+          height: cornerSize,
+        }}
+      />
+    </div>
+  );
+};
+
+// ============================================
+// DimensionBadge 组件（需求 3.1-3.5）
+// ============================================
+
+interface DimensionBadgeProps {
+  width: number;                 // 图片实际宽度
+  height: number;                // 图片实际高度
+  isVisible: boolean;            // 是否显示
+  isDragging: boolean;           // 是否正在拖拽
+}
+
+/**
+ * 像素尺寸标签组件
+ * 显示在图片上方左侧
+ * 
+ * 需求: 3.1, 3.2, 3.3, 3.4, 3.5
+ */
+const DimensionBadge: React.FC<DimensionBadgeProps> = ({
+  width,
+  height,
+  isVisible,
+  isDragging,
+}) => {
+  // 动画状态
+  const [animationState, setAnimationState] = useState<'entering' | 'visible' | 'exiting' | 'hidden'>(
+    isVisible && !isDragging ? 'visible' : 'hidden'
+  );
+
+  // 监听显示状态变化
+  useEffect(() => {
+    const shouldShow = isVisible && !isDragging;
+    
+    if (shouldShow) {
+      setAnimationState('entering');
+      const timer = setTimeout(() => {
+        setAnimationState('visible');
+      }, 200);
+      return () => clearTimeout(timer);
+    } else {
+      if (animationState !== 'hidden') {
+        setAnimationState('exiting');
+        const timer = setTimeout(() => {
+          setAnimationState('hidden');
+        }, 150);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isVisible, isDragging]);
+
+  // 如果完全隐藏，不渲染
+  if (animationState === 'hidden') {
+    return null;
+  }
+
+  const animationClass = animationState === 'entering' 
+    ? 'selection-ui-entering' 
+    : animationState === 'exiting' 
+      ? 'selection-ui-exiting' 
+      : '';
+
+  return (
+    <div className={`dimension-badge ${animationClass}`}>
+      {formatDimensions(width, height)}
+    </div>
+  );
+};
+
+// ============================================
+// ActionToolbar 组件（需求 4.1-4.6）
+// ============================================
+
+interface ActionToolbarProps {
+  image: CanvasImage;            // 图片数据
+  isVisible: boolean;            // 是否显示
+  isDragging: boolean;           // 是否正在拖拽
+  onEdit?: () => void;           // 编辑回调
+  onRegenerate?: () => void;     // 重新生成回调
+  onAddAsReference?: () => void; // 添加为参考图回调
+  onFavorite?: () => void;       // 收藏回调
+  onDownload?: () => void;       // 下载回调
+  onShare?: () => void;          // 分享回调
+  onDelete?: () => void;         // 删除回调
+}
+
+/**
+ * 操作工具栏组件
+ * 显示在图片上方右侧，水平排列
+ * 
+ * 需求: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
+ */
+const ActionToolbar: React.FC<ActionToolbarProps> = ({
+  image,
+  isVisible,
+  isDragging,
+  onEdit,
+  onRegenerate,
+  onAddAsReference,
+  onFavorite,
+  onDownload,
+  onShare,
+  onDelete,
+}) => {
+  // 动画状态
+  const [animationState, setAnimationState] = useState<'entering' | 'visible' | 'exiting' | 'hidden'>(
+    isVisible && !isDragging ? 'visible' : 'hidden'
+  );
+
+  // 监听显示状态变化
+  useEffect(() => {
+    const shouldShow = isVisible && !isDragging;
+    
+    if (shouldShow) {
+      setAnimationState('entering');
+      const timer = setTimeout(() => {
+        setAnimationState('visible');
+      }, 200);
+      return () => clearTimeout(timer);
+    } else {
+      if (animationState !== 'hidden') {
+        setAnimationState('exiting');
+        const timer = setTimeout(() => {
+          setAnimationState('hidden');
+        }, 150);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isVisible, isDragging]);
+
+  // 如果完全隐藏，不渲染
+  if (animationState === 'hidden') {
+    return null;
+  }
+
+  const animationClass = animationState === 'entering' 
+    ? 'selection-ui-entering' 
+    : animationState === 'exiting' 
+      ? 'selection-ui-exiting' 
+      : '';
+
+  // 判断是否显示重新生成按钮
+  const showRegenerate = shouldShowRegenerateButton(image);
+
+  return (
+    <div className={`action-toolbar ${animationClass}`}>
+      {/* 编辑按钮 */}
+      {onEdit && (
+        <button
+          className="action-toolbar-btn btn-edit"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          title="编辑图片"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+      )}
+      
+      {/* 添加为参考图按钮 */}
+      {onAddAsReference && (
+        <button
+          className="action-toolbar-btn btn-reference"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddAsReference();
+          }}
+          title="添加为参考图"
+        >
+          <ImagePlus className="w-3.5 h-3.5" />
+        </button>
+      )}
+      
+      {/* 重新生成按钮 - 仅对生成的图片显示 */}
+      {onRegenerate && showRegenerate && (
+        <button
+          className="action-toolbar-btn btn-regenerate"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRegenerate();
+          }}
+          title="重新生成"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      )}
+      
+      {/* 收藏按钮 */}
+      {onFavorite && (
+        <button
+          className={`action-toolbar-btn btn-favorite ${image.favorite ? 'active' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFavorite();
+          }}
+          title="收藏"
+        >
+          <Heart className={`w-3.5 h-3.5 ${image.favorite ? 'fill-current' : ''}`} />
+        </button>
+      )}
+      
+      {/* 下载按钮 */}
+      {onDownload && (
+        <button
+          className="action-toolbar-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownload();
+          }}
+          title="下载"
+        >
+          <Download className="w-3.5 h-3.5" />
+        </button>
+      )}
+      
+      {/* 分享按钮 */}
+      {onShare && (
+        <button
+          className="action-toolbar-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShare();
+          }}
+          title="分享"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+      
+      {/* 删除按钮 */}
+      {onDelete && (
+        <button
+          className="action-toolbar-btn btn-delete"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          title="删除"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
 
 interface CanvasImageLayerProps {
   // 所有图片
@@ -150,9 +596,6 @@ const CanvasImageItem: React.FC<{
   const { width: actualWidth, height: actualHeight } = getImageDimensions(image);
   const displayActualWidth = Math.round(actualWidth);
   const displayActualHeight = Math.round(actualHeight);
-
-  // 判断是否为编辑过的图片
-  const isEdited = image.model === 'edited';
 
   // 加载状态
   const [loadingState, setLoadingState] = useState<LoadingState>(
@@ -301,11 +744,12 @@ const CanvasImageItem: React.FC<{
   // 是否有可显示的图片（Blob URL 已缓存）
   const hasDisplayableImage = displayUrl !== null;
 
+  // 获取图片类型用于四角指示器颜色
+  const imageType = getImageType(image);
+
   return (
     <div
-      className={`absolute cursor-move group ${
-        isSelected ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-transparent' : ''
-      }`}
+      className={`absolute cursor-move group ${isDragging ? 'dragging' : ''}`}
       style={{
         top: 0,
         left: 0,
@@ -313,8 +757,6 @@ const CanvasImageItem: React.FC<{
         width: imgWidth,
         height: imgHeight,
         willChange: isDragging ? 'transform' : 'auto',
-        // 编辑过的图片添加左边框
-        borderLeft: isEdited ? '3px solid rgba(168, 85, 247, 0.6)' : 'none',
       }}
       onMouseDown={onMouseDown}
       onDoubleClick={(e) => {
@@ -322,6 +764,40 @@ const CanvasImageItem: React.FC<{
         handleDoubleClick();
       }}
     >
+      {/* 四角 L 形选中指示器 - 拖拽时也显示 */}
+      <SelectionCorners
+        isSelected={isSelected}
+        imageType={imageType}
+        width={imgWidth}
+        height={imgHeight}
+      />
+      
+      {/* 选中状态 UI 容器 - 尺寸标签和操作工具栏 */}
+      {isSelected && (
+        <div className="selection-ui-container">
+          {/* 尺寸标签 - 左侧 */}
+          <DimensionBadge
+            width={displayActualWidth}
+            height={displayActualHeight}
+            isVisible={isSelected}
+            isDragging={isDragging}
+          />
+          
+          {/* 操作工具栏 - 右侧 */}
+          <ActionToolbar
+            image={image}
+            isVisible={isSelected}
+            isDragging={isDragging}
+            onEdit={onEdit}
+            onAddAsReference={onAddAsReference}
+            onRegenerate={onRegenerate}
+            onFavorite={onFavorite}
+            onDownload={onDownload}
+            onShare={onShare}
+            onDelete={onDelete}
+          />
+        </div>
+      )}
       {isFailed ? (
         // 失败状态显示
         <div className="w-full h-full glass-card rounded-xl flex flex-col items-center justify-center gap-3 border border-red-500/30 bg-red-500/5">
@@ -409,103 +885,7 @@ const CanvasImageItem: React.FC<{
             />
           )}
           
-          {/* 尺寸信息标签 - 左上角 */}
-          <div className="absolute -top-2 -left-2 px-2 py-1 bg-black/80 text-white text-xs rounded-md border border-white/20 shadow-lg">
-            {displayActualWidth} × {displayActualHeight}
-          </div>
-          
-          {/* 操作按钮 */}
-          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            {/* 编辑按钮 - 位于最左侧 */}
-            {onEdit && (
-              <button
-                className="btn-glass p-2 rounded-lg hover:bg-violet-500/20"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit();
-                }}
-                title="编辑图片"
-              >
-                <Pencil className="w-3.5 h-3.5 text-violet-400" />
-              </button>
-            )}
-            {/* 添加为参考图按钮 */}
-            {onAddAsReference && (
-              <button
-                className="btn-glass p-2 rounded-lg hover:bg-emerald-500/20"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onAddAsReference();
-                }}
-                title="添加为参考图"
-              >
-                <ImagePlus className="w-3.5 h-3.5 text-emerald-400" />
-              </button>
-            )}
-            {/* 重新生成按钮 - 编辑过的图片不显示 */}
-            {onRegenerate && !isEdited && (
-              <button
-                className="btn-glass p-2 rounded-lg hover:bg-violet-500/20"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRegenerate();
-                }}
-                title="重新生成"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-violet-400" />
-              </button>
-            )}
-            {onFavorite && (
-              <button
-                className="btn-glass p-2 rounded-lg"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onFavorite();
-                }}
-                title="收藏"
-              >
-                <Heart
-                  className={`w-3.5 h-3.5 ${
-                    image.favorite ? 'text-red-400 fill-red-400' : 'text-zinc-300'
-                  }`}
-                />
-              </button>
-            )}
-            {onDownload && (
-              <button
-                className="btn-glass p-2 rounded-lg"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDownload();
-                }}
-                title="下载"
-              >
-                <Download className="w-3.5 h-3.5 text-zinc-300" />
-              </button>
-            )}
-            {onShare && (
-              <button
-                className="btn-glass p-2 rounded-lg"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onShare();
-                }}
-                title="分享"
-              >
-                <Share2 className="w-3.5 h-3.5 text-zinc-300" />
-              </button>
-            )}
-            <button
-              className="btn-glass p-2 rounded-lg hover:bg-red-500/20"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              title="删除"
-            >
-              <X className="w-3.5 h-3.5 text-zinc-300" />
-            </button>
-          </div>
+
 
           {/* 提示词信息 */}
           <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">

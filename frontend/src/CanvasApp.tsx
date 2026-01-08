@@ -27,6 +27,7 @@ import { useCanvasImages, calculateBatchPositions, prepareGenerationAreaAndFocus
 import { CanvasImageLayer } from './components/CanvasImageLayer';
 import { imageLoadingManager } from './services/imageLoadingManager';
 import { useCanvasSelection } from './hooks/useCanvasSelection';
+import { useUndoHistory } from './hooks/useUndoHistory';
 import { SelectionBox } from './components/SelectionBox';
 import { getIntersectingImageIds, normalizeSelectionRect } from './utils/selectionUtils';
 import { downloadImage, generateDownloadFilename } from './utils/downloadUtils';
@@ -205,6 +206,43 @@ function CanvasApp() {
     handleKeyUp: handleSelectionKeyUp,
   } = useCanvasSelection();
 
+  // 显示 Toast 提示的辅助函数（用于撤回/重做操作反馈）
+  const showToastMessage = useCallback((message: string, type: 'success' | 'error' | 'info' | 'warning') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+  }, []);
+
+  // 使用撤回/重做功能 Hook（简化版：只支持删除操作，无 UI，无 Toast）
+  const {
+    canUndo,
+    canRedo,
+    undoCount,
+    redoCount,
+    isProcessing: isUndoProcessing,
+    recordDeleteAction,
+    recordBatchDeleteAction,
+    undo,
+    redo,
+    clearHistory: clearUndoHistory,
+  } = useUndoHistory({
+    onRestoreImage: (imageData, position) => {
+      // 恢复图片时刷新列表（由 onRefreshImages 处理）
+      // 位置信息会在 API 恢复时自动处理
+      console.log('图片已恢复:', imageData.id, '位置:', position);
+    },
+    onDeleteImage: (imageId) => {
+      // 重做删除时从本地状态移除
+      removeImage(imageId);
+    },
+    onRefreshImages: async () => {
+      // 刷新项目图片列表
+      if (currentProject?.id) {
+        await loadProjectImages(currentProject.id);
+      }
+    },
+  });
+
   // 画布缩放和拖拽状态
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -217,6 +255,9 @@ function CanvasApp() {
   
   // 正在拖拽的图片 ID 集合（用于 will-change 优化）
   const [draggingImageIds, setDraggingImageIds] = useState<Set<string>>(new Set());
+  
+  // 拖拽开始时图片的原始位置（用于撤回记录）
+  const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   
   // 是否正在进行 pan/zoom 交互（用于跳过 React 重渲染）
   const isPanningRef = useRef(false);
@@ -267,8 +308,10 @@ function CanvasApp() {
       setViewportRestored(false);
       // 清理图片加载管理器
       imageLoadingManager.clear();
+      // 清空撤回/重做历史（需求 5.5）
+      clearUndoHistory();
     }
-  }, [currentProject?.id, databaseConnected, loadProjectImages]);
+  }, [currentProject?.id, databaseConnected, loadProjectImages, clearUndoHistory]);
 
   // 恢复视口状态（需求 3.2）
   useEffect(() => {
@@ -706,6 +749,273 @@ function CanvasApp() {
     setShowToast(true);
   }, [settings.refImages]);
 
+  // 上传图片输入框的 ref
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  
+  // 是否正在上传
+  const [isUploading, setIsUploading] = useState(false);
+  
+  // 拖拽上传状态
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  /**
+   * 处理上传图片到画布
+   * 支持批量上传，自动计算位置避免重叠
+   */
+  const handleUploadImages = useCallback(async (files: FileList | File[]) => {
+    if (!currentProject?.id) {
+      setToastMessage('请先选择一个项目');
+      setToastType('warning');
+      setShowToast(true);
+      return;
+    }
+
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      setToastMessage('请选择图片文件');
+      setToastType('warning');
+      setShowToast(true);
+      return;
+    }
+
+    setIsUploading(true);
+    const token = getAuthToken();
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      // 获取所有图片的尺寸信息
+      const imageInfos: { file: File; width: number; height: number }[] = [];
+      
+      for (const file of imageFiles) {
+        const dimensions = await getImageDimensions(file);
+        imageInfos.push({ file, ...dimensions });
+      }
+
+      // 计算所有图片的位置（避免重叠）
+      // 使用第一张图片的尺寸作为基准计算位置
+      const firstImageSize = calculateCanvasDisplaySize(imageInfos[0].width, imageInfos[0].height);
+      const positions = calculateBatchPositions(
+        persistedImages as any,
+        firstImageSize,
+        imageFiles.length
+      );
+
+      // 逐个上传图片
+      for (let i = 0; i < imageInfos.length; i++) {
+        const { file, width, height } = imageInfos[i];
+        const pos = positions[i] || { x: 100 + i * 420, y: 100 };
+
+        try {
+          // 1. 上传图片到存储
+          const formData = new FormData();
+          formData.append('image', file);
+          
+          const uploadResponse = await fetch('/api/images/upload', {
+            method: 'POST',
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+          });
+          
+          if (!uploadResponse.ok) {
+            throw new Error('上传图片失败');
+          }
+          
+          const uploadResult = await uploadResponse.json();
+          if (!uploadResult.success) {
+            throw new Error(uploadResult.error || '上传图片失败');
+          }
+          
+          const imageUrl = uploadResult.data.url;
+          const thumbnailUrl = uploadResult.data.thumbnailUrl;
+          
+          // 2. 保存图片记录到数据库（标记为上传的图片）
+          const saveResponse = await fetch('/api/images', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              url: imageUrl,
+              thumbnailUrl,
+              prompt: file.name.replace(/\.[^/.]+$/, ''),  // 使用文件名作为 prompt
+              model: 'uploaded',  // 标记为上传的图片
+              aspectRatio: 'auto',
+              imageSize: '1K',
+              projectId: currentProject.id,
+              canvasX: Math.round(pos.x),
+              canvasY: Math.round(pos.y),
+              width: Math.round(width),
+              height: Math.round(height),
+            }),
+          });
+          
+          if (!saveResponse.ok) {
+            throw new Error('保存图片记录失败');
+          }
+          
+          successCount++;
+        } catch (error: any) {
+          console.error(`上传图片 ${file.name} 失败:`, error);
+          failCount++;
+        }
+      }
+
+      // 刷新项目图片列表
+      await savePendingPositions();
+      await loadProjectImages(currentProject.id);
+
+      // 显示结果提示
+      if (failCount === 0) {
+        setToastMessage(`成功上传 ${successCount} 张图片`);
+        setToastType('success');
+      } else if (successCount > 0) {
+        setToastMessage(`上传完成：${successCount} 成功，${failCount} 失败`);
+        setToastType('warning');
+      } else {
+        setToastMessage('上传失败');
+        setToastType('error');
+      }
+      setShowToast(true);
+
+    } catch (error: any) {
+      console.error('上传图片失败:', error);
+      setToastMessage(error.message || '上传失败');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setIsUploading(false);
+    }
+  }, [currentProject?.id, persistedImages, savePendingPositions, loadProjectImages]);
+
+  /**
+   * 获取图片尺寸
+   */
+  const getImageDimensions = (file: File): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        URL.revokeObjectURL(img.src);
+      };
+      img.onerror = () => {
+        reject(new Error('无法读取图片尺寸'));
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  /**
+   * 点击上传按钮
+   */
+  const handleUploadButtonClick = useCallback(() => {
+    uploadInputRef.current?.click();
+  }, []);
+
+  /**
+   * 处理文件选择
+   */
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleUploadImages(files);
+    }
+    // 清空 input，允许重复选择同一文件
+    e.target.value = '';
+  }, [handleUploadImages]);
+
+  /**
+   * 处理拖拽进入
+   */
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // 检查是否包含文件
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  /**
+   * 处理拖拽离开
+   */
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // 只有当离开画布区域时才取消拖拽状态
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      const { clientX, clientY } = e;
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        setIsDragOver(false);
+      }
+    }
+  }, []);
+
+  /**
+   * 处理拖拽悬停
+   */
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  /**
+   * 处理拖拽放下
+   */
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      handleUploadImages(files);
+    }
+  }, [handleUploadImages]);
+
+  /**
+   * 处理粘贴上传
+   */
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    // 如果正在输入框中，不处理粘贴
+    const activeElement = document.activeElement;
+    if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+      return;
+    }
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          imageFiles.push(file);
+        }
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      handleUploadImages(imageFiles);
+    }
+  }, [handleUploadImages]);
+
+  // 监听粘贴事件
+  useEffect(() => {
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [handlePaste]);
+
   /**
    * 双击放大图片到视口 80%（需求 6.1, 6.2, 6.3, 6.4）
    * 如果已经放大，则恢复到之前的视口状态
@@ -825,13 +1135,96 @@ function CanvasApp() {
   const handleDeleteImageRef = useRef<((id: string) => Promise<void>) | null>(null);
 
   /**
+   * 批量删除图片（记录为单个撤回操作）
+   * 简化版：只支持删除操作，包含位置信息
+   */
+  const handleBatchDeleteImages = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    
+    // 过滤掉占位符，只处理持久化的图片
+    const imagesToDelete = ids
+      .filter(id => !localCanvasImages.some(img => img.id === id && img.isPlaceholder))
+      .map(id => {
+        const imageData = persistedImages.find(img => img.id === id);
+        if (imageData) {
+          // 获取图片当前位置
+          const position = {
+            x: (imageData as any).x ?? imageData.canvasX ?? 0,
+            y: (imageData as any).y ?? imageData.canvasY ?? 0,
+          };
+          return { imageId: id, imageData, position };
+        }
+        return null;
+      })
+      .filter((item): item is { imageId: string; imageData: CanvasImageType; position: { x: number; y: number } } => item !== null);
+    
+    if (imagesToDelete.length === 0) {
+      // 只有占位符，直接删除
+      setLocalCanvasImages(prev => prev.filter(img => !ids.includes(img.id)));
+      return;
+    }
+    
+    // 逐个调用 API 删除
+    const successfulDeletes: { imageId: string; imageData: CanvasImageType; position: { x: number; y: number } }[] = [];
+    
+    for (const { imageId, imageData, position } of imagesToDelete) {
+      try {
+        const response = await apiService.deleteImage(imageId);
+        if (response.success) {
+          successfulDeletes.push({ imageId, imageData, position });
+          removeImage(imageId);
+        } else {
+          console.error('删除图片失败:', response.error);
+        }
+      } catch (error: any) {
+        console.error('删除图片失败:', error);
+      }
+    }
+    
+    // 记录批量删除操作到撤回栈（包含位置信息）
+    if (successfulDeletes.length > 0) {
+      if (successfulDeletes.length === 1) {
+        recordDeleteAction(successfulDeletes[0].imageId, successfulDeletes[0].imageData, successfulDeletes[0].position);
+      } else {
+        recordBatchDeleteAction(successfulDeletes);
+      }
+      console.log(`已删除 ${successfulDeletes.length} 张图片`);
+    }
+    
+    // 清除选中状态
+    ids.forEach(id => {
+      if (selectedImageId === id) setSelectedImageId(null);
+      selectionActions.deselectImage(id);
+    });
+  }, [localCanvasImages, persistedImages, removeImage, recordDeleteAction, recordBatchDeleteAction, selectedImageId, selectionActions]);
+
+  /**
    * ESC 键恢复放大状态（需求 6.3）和多选功能键盘事件
    */
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       // 如果正在输入，不处理快捷键
       const activeElement = document.activeElement;
       if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      // 撤回快捷键：Ctrl+Z / Cmd+Z（无 Toast 提示）
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        if (canUndo && !isUndoProcessing) {
+          await undo();
+        }
+        return;
+      }
+
+      // 重做快捷键：Ctrl+Shift+Z / Cmd+Shift+Z 或 Ctrl+Y（无 Toast 提示）
+      if (((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') || 
+          ((e.ctrlKey || e.metaKey) && e.key === 'y')) {
+        e.preventDefault();
+        if (canRedo && !isUndoProcessing) {
+          await redo();
+        }
         return;
       }
 
@@ -846,12 +1239,8 @@ function CanvasApp() {
 
       // 多选功能键盘事件处理（需求 2.1, 7.1, 7.2, 7.3）
       handleSelectionKeyDown(e, persistedImages, async (ids) => {
-        // 批量删除选中的图片
-        if (handleDeleteImageRef.current) {
-          for (const id of ids) {
-            await handleDeleteImageRef.current(id);
-          }
-        }
+        // 批量删除选中的图片（记录为单个撤回操作）
+        await handleBatchDeleteImages(Array.from(ids));
       });
     };
 
@@ -866,7 +1255,7 @@ function CanvasApp() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoomState, canvasImages, handleImageZoom, handleSelectionKeyDown, handleSelectionKeyUp, persistedImages]);
+  }, [zoomState, canvasImages, handleImageZoom, handleSelectionKeyDown, handleSelectionKeyUp, persistedImages, handleBatchDeleteImages, canUndo, canRedo, isUndoProcessing, undo, redo]);
 
 
   // 初始化应用
@@ -1151,11 +1540,20 @@ function CanvasApp() {
           
           // 设置正在拖拽的图片 ID 集合（用于 will-change 优化）
           if (selection.selectedIds.has(target) && selection.selectedIds.size > 1) {
-            // 多选拖拽
+            // 多选拖拽 - 记录所有选中图片的原始位置
             setDraggingImageIds(new Set(selection.selectedIds));
+            const startPositions = new Map<string, { x: number; y: number }>();
+            selection.selectedIds.forEach(id => {
+              const selectedImg = canvasImages.find(i => i.id === id);
+              if (selectedImg) {
+                startPositions.set(id, { x: selectedImg.x, y: selectedImg.y });
+              }
+            });
+            dragStartPositionsRef.current = startPositions;
           } else {
-            // 单选拖拽
+            // 单选拖拽 - 记录单张图片的原始位置
             setDraggingImageIds(new Set([target]));
+            dragStartPositionsRef.current = new Map([[target, { x: img.x, y: img.y }]]);
           }
           
           setIsDragging(true);
@@ -1259,6 +1657,10 @@ function CanvasApp() {
       setShowLocateLatest(true);
     }
     
+    // 移动操作不再记录到撤回栈（简化版撤回功能只支持删除操作）
+    // 清空原始位置记录
+    dragStartPositionsRef.current.clear();
+    
     // 清除拖拽图片集合（移除 will-change）
     setDraggingImageIds(new Set());
     
@@ -1272,30 +1674,42 @@ function CanvasApp() {
     const isPlaceholder = localCanvasImages.some(img => img.id === id && img.isPlaceholder);
     
     if (isPlaceholder) {
-      // 删除本地占位符
+      // 删除本地占位符（不记录到撤回栈）
       setLocalCanvasImages(prev => prev.filter(img => img.id !== id));
     } else {
+      // 获取图片数据用于撤回记录
+      const imageToDelete = persistedImages.find(img => img.id === id);
+      
       // 调用后端 API 将图片移入回收站（软删除）
       try {
         const response = await apiService.deleteImage(id);
         if (response.success) {
+          // 记录删除操作到撤回栈（包含位置信息）
+          if (imageToDelete) {
+            // 获取图片当前位置
+            const position = {
+              x: (imageToDelete as any).x ?? imageToDelete.canvasX ?? 0,
+              y: (imageToDelete as any).y ?? imageToDelete.canvasY ?? 0,
+            };
+            recordDeleteAction(id, imageToDelete, position);
+          }
           // 从本地状态中移除图片
           removeImage(id);
           console.log('图片已移入回收站');
         } else {
           console.error('删除图片失败:', response.error);
-          alert('删除图片失败: ' + (response.error || '未知错误'));
+          showToastMessage('删除图片失败: ' + (response.error || '未知错误'), 'error');
         }
       } catch (error: any) {
         console.error('删除图片失败:', error);
-        alert('删除图片失败: ' + error.message);
+        showToastMessage('删除图片失败: ' + error.message, 'error');
       }
     }
     
     if (selectedImageId === id) setSelectedImageId(null);
     // 同时从多选集合中移除
     selectionActions.deselectImage(id);
-  }, [selectedImageId, localCanvasImages, removeImage, selectionActions]);
+  }, [selectedImageId, localCanvasImages, persistedImages, removeImage, selectionActions, recordDeleteAction, showToastMessage]);
 
   // 更新 handleDeleteImage ref（用于键盘事件处理）
   useEffect(() => {
@@ -1819,6 +2233,10 @@ function CanvasApp() {
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
           onMouseLeave={handleMouseUp}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
         >
           {/* 项目图片加载进度指示器（需求 1.1, 13.1） */}
           {isLoadingImages && (
@@ -1826,6 +2244,16 @@ function CanvasApp() {
               <div className="glass-card rounded-xl px-4 py-3 flex items-center gap-3">
                 <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
                 <span className="text-sm text-zinc-300">正在加载项目图片...</span>
+              </div>
+            </div>
+          )}
+          
+          {/* 上传进度指示器 */}
+          {isUploading && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+              <div className="glass-card rounded-xl px-4 py-3 flex items-center gap-3">
+                <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                <span className="text-sm text-zinc-300">正在上传图片...</span>
               </div>
             </div>
           )}
@@ -1986,7 +2414,27 @@ function CanvasApp() {
             maxScale={3}
             onOpenImageLibrary={() => setShowImageLibrary(true)}
             onOpenTrashBin={() => setShowTrashBin(true)}
+            onUploadImages={handleUploadButtonClick}
           />
+          
+          {/* 隐藏的文件上传输入框 */}
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+          
+          {/* 拖拽上传遮罩 */}
+          {isDragOver && (
+            <div className="absolute inset-0 z-50 bg-violet-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+              <div className="glass-card px-8 py-6 rounded-2xl border-2 border-dashed border-violet-500/50">
+                <p className="text-lg text-violet-400 font-medium">释放以上传图片</p>
+              </div>
+            </div>
+          )}
 
           {/* 定位到最新按钮（需求 7.1, 7.3） */}
           {showLocateLatest && persistedImages.length > 0 && (
@@ -1998,6 +2446,9 @@ function CanvasApp() {
               <span>定位到最新</span>
             </button>
           )}
+          
+          {/* 画布渐晕效果 - 边缘变暗，营造聚光灯效果 */}
+          <div className="canvas-vignette" />
         </main>
       </div>
 
@@ -2020,6 +2471,7 @@ function CanvasApp() {
         onClearError={() => setGenerationError(null)}
         generateCount={generateCount}
         onGenerateCountChange={setGenerateCount}
+        // 撤回/重做功能已移除 UI，只通过键盘快捷键控制
       />
 
       {/* 图片详情弹窗 */}

@@ -532,3 +532,55 @@ export interface DatabaseService {
   clearUserData(requireConfirmation?: boolean): Promise<void>;
   initializeTables(): Promise<void>;
 }
+
+
+// ============================================
+// 撤回/重做系统类型定义
+// ============================================
+
+// 操作类型枚举
+export type UndoActionType = 'delete' | 'move' | 'batch_delete' | 'batch_move';
+
+// 位置类型
+export interface Position {
+  x: number;
+  y: number;
+}
+
+// 删除操作数据
+export interface DeleteActionData {
+  imageId: string;               // 被删除图片的 ID
+  imageData: CanvasImage;        // 完整的图片数据，用于恢复
+}
+
+// 移动操作数据
+export interface MoveActionData {
+  imageId: string;               // 被移动图片的 ID
+  fromPosition: Position;        // 移动前的位置
+  toPosition: Position;          // 移动后的位置
+}
+
+// 批量删除操作数据
+export interface BatchDeleteActionData {
+  images: DeleteActionData[];    // 被删除的图片列表
+}
+
+// 批量移动操作数据
+export interface BatchMoveActionData {
+  moves: MoveActionData[];       // 移动操作列表
+}
+
+// 操作记录
+export interface UndoAction {
+  id: string;                    // 操作唯一标识
+  type: UndoActionType;          // 操作类型
+  timestamp: number;             // 操作时间戳
+  data: DeleteActionData | MoveActionData | BatchDeleteActionData | BatchMoveActionData;
+}
+
+// 操作历史状态
+export interface UndoHistoryState {
+  undoStack: UndoAction[];       // 撤回栈（最新操作在栈顶）
+  redoStack: UndoAction[];       // 重做栈（最近撤回的操作在栈顶）
+  maxHistorySize: number;        // 最大历史记录数量（默认 50）
+}

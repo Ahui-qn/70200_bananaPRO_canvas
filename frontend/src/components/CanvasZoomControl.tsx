@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoomIn, ZoomOut, Maximize2, FolderOpen, Trash2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, FolderOpen, Trash2, Upload } from 'lucide-react';
 
 // ============================================
 // 类型定义
@@ -17,6 +17,7 @@ export interface CanvasZoomControlProps {
   // 可选的额外按钮
   onOpenImageLibrary?: () => void;
   onOpenTrashBin?: () => void;
+  onUploadImages?: () => void;  // 上传图片
 }
 
 // ============================================
@@ -32,6 +33,7 @@ export const CanvasZoomControl: React.FC<CanvasZoomControlProps> = ({
   maxScale = 3,
   onOpenImageLibrary,
   onOpenTrashBin,
+  onUploadImages,
 }) => {
   // 处理缩放增减（以窗口中心为基准）
   const handleZoom = (delta: number) => {
@@ -155,6 +157,20 @@ export const CanvasZoomControl: React.FC<CanvasZoomControlProps> = ({
         onTouchStart={stopPropagation}
       >
         <div className="flex items-center gap-2">
+          {/* 上传图片按钮 */}
+          {onUploadImages && (
+            <button
+              type="button"
+              onClick={onUploadImages}
+              className="w-10 h-10 rounded-full glass-button
+                         flex items-center justify-center transition-all duration-200
+                         touch-target active:scale-95"
+              title="上传图片"
+            >
+              <Upload className="w-5 h-5 text-zinc-300" />
+            </button>
+          )}
+          
           {/* 图片库按钮 */}
           {onOpenImageLibrary && (
             <button
