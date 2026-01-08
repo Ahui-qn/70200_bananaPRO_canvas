@@ -37,7 +37,7 @@ type StateChangeCallback = (imageId: string, state: LoadingState) => void;
 const LOAD_DELAY = 300;
 
 // 缩放比例阈值：低于此值使用缩略图，高于或等于此值使用原图
-const SCALE_THRESHOLD = 0.7;
+const SCALE_THRESHOLD = 0.8;
 
 // 防抖延迟时间（毫秒）
 const DEBOUNCE_DELAY = 300;

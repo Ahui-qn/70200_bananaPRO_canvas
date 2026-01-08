@@ -13,27 +13,50 @@ import refImagesRouter from './routes/refImages.js';
 import authRouter from './routes/auth.js';
 import projectsRouter from './routes/projects.js';
 import trashRouter from './routes/trash.js';
+import staticImagesRouter from './routes/staticImages.js';
 
 // 导入中间件
 import { authMiddleware } from './middleware/auth.js';
 
 // 导入服务
-import { aliOssService } from './services/aliOssService.js';
+import { storageManager } from './services/storageManager.js';
 import { databaseService } from './services/databaseService.js';
+import { databaseManager } from './services/databaseManager.js';
 
 // 加载环境变量
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
-// 初始化 OSS 服务
-const ossInitialized = aliOssService.initialize();
+// 初始化存储服务
+const storageInitialized = storageManager.initialize();
 
 /**
- * 从环境变量获取数据库配置并自动连接
+ * 初始化数据库
+ * 根据 DATABASE_MODE 环境变量选择使用 MySQL 或 SQLite
  */
 async function initializeDatabase(): Promise<boolean> {
+  const databaseMode = process.env.DATABASE_MODE?.toLowerCase();
+  
+  // SQLite 模式
+  if (databaseMode === 'sqlite') {
+    try {
+      console.log('📦 使用 SQLite 数据库模式...');
+      const result = await databaseManager.initialize();
+      if (result) {
+        console.log('✅ SQLite 数据库初始化成功');
+        return true;
+      } else {
+        console.warn('⚠️  SQLite 数据库初始化失败');
+        return false;
+      }
+    } catch (error: any) {
+      console.error('❌ SQLite 数据库错误:', error.message);
+      return false;
+    }
+  }
+  
+  // MySQL 模式（默认）
   const dbHost = process.env.DB_HOST;
   const dbPort = process.env.DB_PORT;
   const dbDatabase = process.env.DB_DATABASE;
@@ -58,18 +81,20 @@ async function initializeDatabase(): Promise<boolean> {
       enabled: true
     };
 
-    console.log('正在连接数据库...');
+    console.log('正在连接 MySQL 数据库...');
     const connected = await databaseService.connect(dbConfig);
     
     if (connected) {
-      console.log('✅ 数据库连接成功');
+      console.log('✅ MySQL 数据库连接成功');
+      // 标记 databaseManager 为 MySQL 模式
+      await databaseManager.initialize();
       return true;
     } else {
-      console.warn('⚠️  数据库连接失败');
+      console.warn('⚠️  MySQL 数据库连接失败');
       return false;
     }
   } catch (error: any) {
-    console.error('❌ 数据库连接错误:', error.message);
+    console.error('❌ MySQL 数据库连接错误:', error.message);
     return false;
   }
 }
@@ -108,6 +133,13 @@ app.get('/api/health', (_req, res) => {
 // API 路由
 app.use('/api/auth', authRouter);
 
+// 静态图片路由（仅本地存储模式）
+// 注意：此路由不需要认证，因为图片 URL 本身就是访问凭证
+if (process.env.STORAGE_MODE?.toLowerCase() === 'local') {
+  app.use('/api/static-images', staticImagesRouter);
+  console.log('📁 已启用本地静态图片服务');
+}
+
 // 受保护的路由（需要登录）
 app.use('/api/images', authMiddleware, imagesRouter);
 app.use('/api/config', authMiddleware, configRouter);
@@ -143,13 +175,23 @@ const startServer = async () => {
   // 初始化数据库连接
   const dbConnected = await initializeDatabase();
   
-  app.listen(PORT, () => {
+  // 获取监听地址
+  const host = process.env.HOST || 'localhost';
+  const port = parseInt(process.env.PORT || '3001', 10);
+  
+  app.listen(port, host, () => {
+    const storageMode = storageManager.getMode();
+    const databaseMode = databaseManager.getMode();
+    
     console.log(`🚀 后端服务已启动`);
-    console.log(`📍 地址: http://localhost:${PORT}`);
+    console.log(`📍 地址: http://${host}:${port}`);
+    if (host === '0.0.0.0') {
+      console.log(`🌐 局域网访问: http://<服务器IP>:${port}`);
+    }
     console.log(`🌍 环境: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
-    console.log(`🗄️  数据库: ${dbConnected ? '已连接' : '未连接'}`);
-    console.log(`☁️  OSS 服务: ${ossInitialized ? '已初始化' : '未配置'}`);
+    console.log(`🔗 健康检查: http://localhost:${port}/api/health`);
+    console.log(`🗄️  数据库: ${dbConnected ? '已连接' : '未连接'} (${databaseMode})`);
+    console.log(`☁️  存储服务: ${storageInitialized ? '已初始化' : '未配置'} (${storageMode})`);
     console.log(`📚 API 文档:`);
     console.log(`   - 图片管理: /api/images`);
     console.log(`   - 配置管理: /api/config`);
@@ -158,6 +200,9 @@ const startServer = async () => {
     console.log(`   - 参考图片: /api/ref-images`);
     console.log(`   - 项目管理: /api/projects`);
     console.log(`   - 回收站: /api/trash`);
+    if (storageMode === 'local') {
+      console.log(`   - 静态图片: /api/static-images`);
+    }
   });
 };
 

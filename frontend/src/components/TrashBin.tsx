@@ -17,6 +17,59 @@ const API_BASE_URL = '/api';
 // 标签页类型
 type TabType = 'projects' | 'images';
 
+// 确认弹框组件
+interface ConfirmDialogProps {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isDanger?: boolean;
+}
+
+const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
+  isOpen,
+  title,
+  message,
+  confirmText = '确定',
+  cancelText = '取消',
+  onConfirm,
+  onCancel,
+  isDanger = false
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative w-full max-w-sm bg-gradient-to-br from-slate-800/95 to-slate-900/95 rounded-2xl border border-white/10 shadow-2xl p-6">
+        <h3 className="text-lg font-semibold text-white mb-2">{title}</h3>
+        <p className="text-sm text-white/60 mb-6 whitespace-pre-line">{message}</p>
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 text-sm transition-colors"
+          >
+            {cancelText}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+              isDanger 
+                ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400' 
+                : 'bg-violet-500/20 hover:bg-violet-500/30 text-violet-400'
+            }`}
+          >
+            {confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // 已删除项目卡片
 interface DeletedProjectCardProps {
   project: DeletedProject;
@@ -174,15 +227,29 @@ const DeletedImageCard: React.FC<DeletedImageCardProps> = ({
 interface TrashBinProps {
   isOpen: boolean;
   onClose: () => void;
+  onImageRestored?: () => void;  // 图片恢复后的回调，用于刷新画布
 }
 
-const TrashBin: React.FC<TrashBinProps> = ({ isOpen, onClose }) => {
+const TrashBin: React.FC<TrashBinProps> = ({ isOpen, onClose, onImageRestored }) => {
   const { user } = useAuth();
   const { refreshProjects } = useProject();
   const [activeTab, setActiveTab] = useState<TabType>('projects');
   const [trashContent, setTrashContent] = useState<TrashContent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // 确认弹框状态
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
 
   const isAdmin = user?.role === 'admin';
 
@@ -265,8 +332,13 @@ const TrashBin: React.FC<TrashBinProps> = ({ isOpen, onClose }) => {
         throw new Error(data.error || '恢复图片失败');
       }
 
-      // 刷新列表
+      // 刷新回收站列表
       await fetchTrashContent();
+      
+      // 通知父组件刷新画布图片
+      if (onImageRestored) {
+        onImageRestored();
+      }
     } catch (err: any) {
       console.error('恢复图片失败:', err);
       alert(err.message || '恢复图片失败');
@@ -275,83 +347,101 @@ const TrashBin: React.FC<TrashBinProps> = ({ isOpen, onClose }) => {
 
   // 永久删除项目
   const handleHardDeleteProject = async (project: DeletedProject) => {
-    if (!confirm(`确定要永久删除项目"${project.name}"吗？\n此操作不可恢复，项目下的所有图片也将被永久删除！`)) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/trash/project/${project.id}`, {
-        method: 'DELETE',
-        headers: {
-          ...getAuthHeaders(),
-          'Content-Type': 'application/json'
+    setConfirmDialog({
+      isOpen: true,
+      title: '永久删除项目',
+      message: `确定要永久删除项目「${project.name}」吗？\n此操作不可恢复，项目下的所有图片也将被永久删除！`,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        try {
+          const response = await fetch(`${API_BASE_URL}/trash/project/${project.id}`, {
+            method: 'DELETE',
+            headers: {
+              ...getAuthHeaders(),
+              'Content-Type': 'application/json'
+            }
+          });
+
+          const data: ApiResponse = await response.json();
+          
+          if (!response.ok || !data.success) {
+            throw new Error(data.error || '永久删除项目失败');
+          }
+
+          // 刷新列表
+          await fetchTrashContent();
+        } catch (err: any) {
+          console.error('永久删除项目失败:', err);
+          alert(err.message || '永久删除项目失败');
         }
-      });
-
-      const data: ApiResponse = await response.json();
-      
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '永久删除项目失败');
       }
-
-      // 刷新列表
-      await fetchTrashContent();
-    } catch (err: any) {
-      console.error('永久删除项目失败:', err);
-      alert(err.message || '永久删除项目失败');
-    }
+    });
   };
 
   // 永久删除图片
   const handleHardDeleteImage = async (image: DeletedImage) => {
-    if (!confirm('确定要永久删除这张图片吗？\n此操作不可恢复！')) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/trash/image/${image.id}`, {
-        method: 'DELETE',
-        headers: {
-          ...getAuthHeaders(),
-          'Content-Type': 'application/json'
+    setConfirmDialog({
+      isOpen: true,
+      title: '永久删除图片',
+      message: '确定要永久删除这张图片吗？\n此操作不可恢复！',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        try {
+          const response = await fetch(`${API_BASE_URL}/trash/image/${image.id}`, {
+            method: 'DELETE',
+            headers: {
+              ...getAuthHeaders(),
+              'Content-Type': 'application/json'
+            }
+          });
+
+          const data: ApiResponse = await response.json();
+          
+          if (!response.ok || !data.success) {
+            throw new Error(data.error || '永久删除图片失败');
+          }
+
+          // 刷新列表
+          await fetchTrashContent();
+        } catch (err: any) {
+          console.error('永久删除图片失败:', err);
+          alert(err.message || '永久删除图片失败');
         }
-      });
-
-      const data: ApiResponse = await response.json();
-      
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '永久删除图片失败');
       }
-
-      // 刷新列表
-      await fetchTrashContent();
-    } catch (err: any) {
-      console.error('永久删除图片失败:', err);
-      alert(err.message || '永久删除图片失败');
-    }
+    });
   };
 
   // 清空回收站
   const handleEmptyTrash = async () => {
-    if (!confirm('确定要清空回收站吗？\n此操作不可恢复，所有已删除的项目和图片将被永久删除！')) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/trash/empty`, {
-        method: 'DELETE',
-        headers: {
-          ...getAuthHeaders(),
-          'Content-Type': 'application/json'
+    setConfirmDialog({
+      isOpen: true,
+      title: '清空回收站',
+      message: '确定要清空回收站吗？\n此操作不可恢复，所有已删除的项目和图片将被永久删除！',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        try {
+          const response = await fetch(`${API_BASE_URL}/trash/empty`, {
+            method: 'DELETE',
+            headers: {
+              ...getAuthHeaders(),
+              'Content-Type': 'application/json'
+            }
+          });
+
+          const data: ApiResponse = await response.json();
+          
+          if (!response.ok || !data.success) {
+            throw new Error(data.error || '清空回收站失败');
+          }
+
+          // 刷新列表
+          await fetchTrashContent();
+        } catch (err: any) {
+          console.error('清空回收站失败:', err);
+          alert(err.message || '清空回收站失败');
         }
-      });
-
-      const data: ApiResponse = await response.json();
-      
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '清空回收站失败');
       }
-
-      // 刷新列表
-      await fetchTrashContent();
-    } catch (err: any) {
-      console.error('清空回收站失败:', err);
-      alert(err.message || '清空回收站失败');
-    }
+    });
   };
 
   if (!isOpen) return null;
@@ -360,12 +450,25 @@ const TrashBin: React.FC<TrashBinProps> = ({ isOpen, onClose }) => {
   const imageCount = trashContent?.images.length || 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* 背景遮罩 */}
-      <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
+    <>
+      {/* 确认弹框 */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText="确定删除"
+        cancelText="取消"
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+        isDanger={true}
       />
+      
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        {/* 背景遮罩 */}
+        <div 
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+        />
       
       {/* 弹窗内容 */}
       <div className="relative w-full max-w-4xl max-h-[85vh] bg-gradient-to-br from-slate-800/95 to-slate-900/95 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
@@ -470,7 +573,8 @@ const TrashBin: React.FC<TrashBinProps> = ({ isOpen, onClose }) => {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

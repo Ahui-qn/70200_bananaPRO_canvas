@@ -3,7 +3,7 @@
  * 提供实时连接状态更新、状态变化通知和连接质量监控功能
  */
 
-import { ConnectionStatus, DatabaseService } from '../types';
+import { ConnectionStatus, DatabaseService } from '@shared/types';
 
 // 连接质量等级
 export enum ConnectionQuality {

@@ -3,7 +3,7 @@
  * 提供数据库错误的友好提示、错误分类和日志记录
  */
 
-import { DatabaseError, OperationLog } from '../types';
+import { DatabaseError, OperationLog } from '@shared/types';
 import { DB_ERROR_CODES, ERROR_MESSAGES, OPERATION_STATUS } from '../config/constants';
 
 /**

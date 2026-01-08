@@ -3,7 +3,7 @@
  * 提供数据库操作相关的辅助函数
  */
 
-import { DatabaseConfig, SavedImage, PaginationOptions, PaginatedResult } from '../types';
+import { DatabaseConfig, SavedImage, PaginationOptions, PaginatedResult } from '@shared/types';
 import { DEFAULT_VALUES, VALIDATION_RULES, ERROR_MESSAGES } from '../config/constants';
 
 /**

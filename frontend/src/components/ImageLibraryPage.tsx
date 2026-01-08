@@ -3,6 +3,7 @@ import { apiService } from '../services/api';
 import { SavedImage, CanvasImage } from '../../../shared/types';
 import { useProject } from '../contexts/ProjectContext';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { downloadImage, generateDownloadFilename } from '../utils/downloadUtils';
 import {
   ArrowLeft,
   Image as ImageIcon,
@@ -21,7 +22,6 @@ import {
   User,
   Loader2,
   Maximize2,
-  XCircle,
 } from 'lucide-react';
 
 interface ImageLibraryPageProps {
@@ -250,13 +250,8 @@ export const ImageLibraryPage: React.FC<ImageLibraryPageProps> = ({
 
   const handleDownload = (image: SavedImage, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const link = document.createElement('a');
-    link.href = image.url;
-    link.download = `nano-banana-${image.id}.jpg`;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // 使用 blob 方式下载，触发系统保存对话框
+    downloadImage(image.url, generateDownloadFilename(image.id));
   };
 
   const formatDate = (date: Date | string) => {

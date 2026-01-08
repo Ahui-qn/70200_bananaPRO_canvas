@@ -18,8 +18,13 @@ interface OSSConfigModalProps {
 }
 
 interface OSSConfigDisplay {
-  region: string;
-  bucket: string;
+  mode: string;
+  modeName: string;
+  region?: string;
+  bucket?: string;
+  path?: string;
+  serverUrl?: string;
+  isLocal: boolean;
 }
 
 // OSS 状态类型
@@ -38,8 +43,11 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
   onClose,
 }) => {
   const [config, setConfig] = useState<OSSConfigDisplay>({
+    mode: 'oss',
+    modeName: '阿里云 OSS',
     region: '',
     bucket: '',
+    isLocal: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -82,13 +90,19 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
       if (response.success && response.data) {
         const data = response.data as any;
         setConfig({
+          mode: data.mode || 'oss',
+          modeName: data.modeName || '阿里云 OSS',
           region: data.region || '',
           bucket: data.bucket || '',
+          path: data.path || '',
+          serverUrl: data.serverUrl || '',
+          isLocal: data.isLocal || false,
         });
-        setIsConfigured(!!(data.region && data.bucket));
+        // 本地模式或 OSS 配置完整都算已配置
+        setIsConfigured(data.isLocal || !!(data.region && data.bucket));
       }
     } catch (error: any) {
-      console.warn('加载 OSS 配置失败:', error);
+      console.warn('加载存储配置失败:', error);
       setMessage({ type: 'error', text: '加载配置失败' });
     } finally {
       setLoading(false);
@@ -198,11 +212,11 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
         {/* 头部 */}
         <div className="flex items-center justify-between p-5 border-b border-zinc-800/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
-              <Cloud className="w-5 h-5 text-blue-400" />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.isLocal ? 'bg-green-500/20' : 'bg-blue-500/20'}`}>
+              <Cloud className={`w-5 h-5 ${config.isLocal ? 'text-green-400' : 'text-blue-400'}`} />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-zinc-100">OSS 云存储</h2>
+              <h2 className="text-base font-semibold text-zinc-100">{config.modeName || '存储配置'}</h2>
               <p className="text-xs text-zinc-500 flex items-center gap-1">
                 <Lock className="w-3 h-3" />
                 只读模式
@@ -229,11 +243,64 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
               <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center mx-auto mb-3">
                 <AlertCircle className="w-6 h-6 text-amber-400" />
               </div>
-              <p className="text-zinc-300 font-medium">未配置 OSS 云存储</p>
+              <p className="text-zinc-300 font-medium">未配置存储</p>
               <p className="text-xs text-zinc-500 mt-1">请在 backend/.env 文件中配置</p>
             </div>
+          ) : config.isLocal ? (
+            /* 本地存储模式 */
+            <>
+              {/* 本地存储状态 */}
+              {ossStatus && (
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${getStatusDisplay(ossStatus)?.bgColor}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={getStatusDisplay(ossStatus)?.color}>
+                      {getStatusDisplay(ossStatus)?.icon}
+                    </span>
+                    <div>
+                      <span className={`text-sm font-medium ${getStatusDisplay(ossStatus)?.color}`}>
+                        {getStatusDisplay(ossStatus)?.label}
+                      </span>
+                      <p className="text-xs text-zinc-500 mt-0.5">{ossStatus.message}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={checkOSSStatus}
+                    disabled={checkingStatus}
+                    className="btn-glass p-2 rounded-lg hover:bg-white/5 disabled:opacity-50"
+                    title="重新检查"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-zinc-400 ${checkingStatus ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-2">存储路径</label>
+                <input
+                  type="text"
+                  value={config.path || ''}
+                  readOnly
+                  className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-2">访问地址</label>
+                <input
+                  type="text"
+                  value={config.serverUrl || ''}
+                  readOnly
+                  className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
+                />
+              </div>
+
+              <p className="text-xs text-green-400 flex items-center gap-1">
+                📁 本地存储模式，图片保存在本地文件系统
+              </p>
+            </>
           ) : (
             <>
+              {/* OSS 云存储模式 */}
               {/* OSS 连接状态 */}
               {ossStatus && (
                 <div className={`flex items-center justify-between p-3 rounded-xl border ${getStatusDisplay(ossStatus)?.bgColor}`}>
@@ -264,7 +331,7 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
                   <label className="block text-xs font-medium text-zinc-400 mb-2">区域</label>
                   <input
                     type="text"
-                    value={getRegionLabel(config.region)}
+                    value={getRegionLabel(config.region || '')}
                     readOnly
                     className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
                   />
@@ -273,7 +340,7 @@ export const OSSConfigModal: React.FC<OSSConfigModalProps> = ({
                   <label className="block text-xs font-medium text-zinc-400 mb-2">存储桶</label>
                   <input
                     type="text"
-                    value={config.bucket}
+                    value={config.bucket || ''}
                     readOnly
                     className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
                   />

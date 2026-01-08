@@ -8,7 +8,7 @@
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { User, UserInfo } from '@shared/types';
-import { databaseService } from './databaseService.js';
+import { databaseManager } from './databaseManager.js';
 import { TABLE_NAMES } from '../config/constants.js';
 
 // bcrypt 加密轮数（cost factor）
@@ -111,29 +111,53 @@ export class UserServiceImpl implements UserService {
     };
 
     // 保存到数据库
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
-    const sql = `
-      INSERT INTO ${TABLE_NAMES.USERS} (
-        id, username, password_hash, display_name, role,
-        created_at, updated_at, last_login_at, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    await connection.execute(sql, [
-      user.id,
-      user.username,
-      user.passwordHash,
-      user.displayName,
-      user.role,
-      user.createdAt,
-      user.updatedAt,
-      user.lastLoginAt,
-      user.isActive
-    ]);
+    // 根据数据库模式使用不同的 SQL 语法
+    const isSQLite = databaseManager.getMode() === 'sqlite';
+    
+    if (isSQLite) {
+      // SQLite 模式：使用 run 方法
+      const sql = `
+        INSERT INTO ${TABLE_NAMES.USERS} (
+          id, username, password_hash, display_name, role,
+          created_at, updated_at, last_login_at, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      connection.prepare(sql).run(
+        user.id,
+        user.username,
+        user.passwordHash,
+        user.displayName,
+        user.role,
+        user.createdAt.toISOString(),
+        user.updatedAt.toISOString(),
+        user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
+        user.isActive ? 1 : 0
+      );
+    } else {
+      // MySQL 模式：使用 execute 方法
+      const sql = `
+        INSERT INTO ${TABLE_NAMES.USERS} (
+          id, username, password_hash, display_name, role,
+          created_at, updated_at, last_login_at, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      await connection.execute(sql, [
+        user.id,
+        user.username,
+        user.passwordHash,
+        user.displayName,
+        user.role,
+        user.createdAt,
+        user.updatedAt,
+        user.lastLoginAt,
+        user.isActive
+      ]);
+    }
 
     console.log(`用户创建成功: ${user.username} (${user.id}), 角色: ${user.role}`);
     return user;
@@ -180,19 +204,27 @@ export class UserServiceImpl implements UserService {
    * @returns 用户对象或 null
    */
   async getUserById(id: string): Promise<User | null> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `SELECT * FROM ${TABLE_NAMES.USERS} WHERE id = ?`;
-    const [rows] = await connection.execute(sql, [id]);
     
-    if ((rows as any[]).length === 0) {
-      return null;
+    if (isSQLite) {
+      const row = connection.prepare(sql).get(id);
+      if (!row) {
+        return null;
+      }
+      return this.rowToUser(row);
+    } else {
+      const [rows] = await connection.execute(sql, [id]);
+      if ((rows as any[]).length === 0) {
+        return null;
+      }
+      return this.rowToUser((rows as any[])[0]);
     }
-
-    return this.rowToUser((rows as any[])[0]);
   }
 
   /**
@@ -202,19 +234,27 @@ export class UserServiceImpl implements UserService {
    * @returns 用户对象或 null
    */
   async getUserByUsername(username: string): Promise<User | null> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `SELECT * FROM ${TABLE_NAMES.USERS} WHERE username = ?`;
-    const [rows] = await connection.execute(sql, [username]);
     
-    if ((rows as any[]).length === 0) {
-      return null;
+    if (isSQLite) {
+      const row = connection.prepare(sql).get(username);
+      if (!row) {
+        return null;
+      }
+      return this.rowToUser(row);
+    } else {
+      const [rows] = await connection.execute(sql, [username]);
+      if ((rows as any[]).length === 0) {
+        return null;
+      }
+      return this.rowToUser((rows as any[])[0]);
     }
-
-    return this.rowToUser((rows as any[])[0]);
   }
 
   /**
@@ -225,20 +265,26 @@ export class UserServiceImpl implements UserService {
    * 需求: 3.4
    */
   async listUsers(): Promise<UserInfo[]> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     // 只查询公开字段，不包含 password_hash
     const sql = `
       SELECT id, username, display_name, role, last_login_at 
       FROM ${TABLE_NAMES.USERS} 
       ORDER BY created_at DESC
     `;
-    const [rows] = await connection.execute(sql);
     
-    return (rows as any[]).map(row => this.rowToUserInfo(row));
+    if (isSQLite) {
+      const rows = connection.prepare(sql).all();
+      return (rows as any[]).map(row => this.rowToUserInfo(row));
+    } else {
+      const [rows] = await connection.execute(sql);
+      return (rows as any[]).map(row => this.rowToUserInfo(row));
+    }
   }
 
   /**
@@ -247,17 +293,23 @@ export class UserServiceImpl implements UserService {
    * @param userId 用户 ID
    */
   async updateLastLogin(userId: string): Promise<void> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `
       UPDATE ${TABLE_NAMES.USERS} 
       SET last_login_at = ? 
       WHERE id = ?
     `;
-    await connection.execute(sql, [new Date(), userId]);
+    
+    if (isSQLite) {
+      connection.prepare(sql).run(new Date().toISOString(), userId);
+    } else {
+      await connection.execute(sql, [new Date(), userId]);
+    }
   }
 
   /**
@@ -266,20 +318,28 @@ export class UserServiceImpl implements UserService {
    * @param userId 用户 ID
    */
   async disableUser(userId: string): Promise<void> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `
       UPDATE ${TABLE_NAMES.USERS} 
-      SET is_active = FALSE, updated_at = ? 
+      SET is_active = ${isSQLite ? '0' : 'FALSE'}, updated_at = ? 
       WHERE id = ?
     `;
-    const [result] = await connection.execute(sql, [new Date(), userId]);
     
-    if ((result as any).affectedRows === 0) {
-      throw new Error('用户不存在');
+    if (isSQLite) {
+      const result = connection.prepare(sql).run(new Date().toISOString(), userId);
+      if (result.changes === 0) {
+        throw new Error('用户不存在');
+      }
+    } else {
+      const [result] = await connection.execute(sql, [new Date(), userId]);
+      if ((result as any).affectedRows === 0) {
+        throw new Error('用户不存在');
+      }
     }
 
     console.log(`用户已禁用: ${userId}`);
@@ -291,20 +351,28 @@ export class UserServiceImpl implements UserService {
    * @param userId 用户 ID
    */
   async enableUser(userId: string): Promise<void> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `
       UPDATE ${TABLE_NAMES.USERS} 
-      SET is_active = TRUE, updated_at = ? 
+      SET is_active = ${isSQLite ? '1' : 'TRUE'}, updated_at = ? 
       WHERE id = ?
     `;
-    const [result] = await connection.execute(sql, [new Date(), userId]);
     
-    if ((result as any).affectedRows === 0) {
-      throw new Error('用户不存在');
+    if (isSQLite) {
+      const result = connection.prepare(sql).run(new Date().toISOString(), userId);
+      if (result.changes === 0) {
+        throw new Error('用户不存在');
+      }
+    } else {
+      const [result] = await connection.execute(sql, [new Date(), userId]);
+      if ((result as any).affectedRows === 0) {
+        throw new Error('用户不存在');
+      }
     }
 
     console.log(`用户已启用: ${userId}`);
@@ -364,20 +432,28 @@ export class UserServiceImpl implements UserService {
    * 需求: 10.2
    */
   async updateUserRole(userId: string, role: UserRole): Promise<void> {
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `
       UPDATE ${TABLE_NAMES.USERS} 
       SET role = ?, updated_at = ? 
       WHERE id = ?
     `;
-    const [result] = await connection.execute(sql, [role, new Date(), userId]);
     
-    if ((result as any).affectedRows === 0) {
-      throw new Error('用户不存在');
+    if (isSQLite) {
+      const result = connection.prepare(sql).run(role, new Date().toISOString(), userId);
+      if (result.changes === 0) {
+        throw new Error('用户不存在');
+      }
+    } else {
+      const [result] = await connection.execute(sql, [role, new Date(), userId]);
+      if ((result as any).affectedRows === 0) {
+        throw new Error('用户不存在');
+      }
     }
 
     console.log(`用户角色已更新: ${userId} -> ${role}`);
@@ -394,7 +470,7 @@ export class UserServiceImpl implements UserService {
       throw new Error('密码长度不能少于6位');
     }
 
-    const connection = databaseService.getConnection();
+    const connection = databaseManager.getConnection();
     if (!connection) {
       throw new Error('数据库未连接');
     }
@@ -402,15 +478,23 @@ export class UserServiceImpl implements UserService {
     // 使用 bcrypt 加密新密码
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
+    const isSQLite = databaseManager.getMode() === 'sqlite';
     const sql = `
       UPDATE ${TABLE_NAMES.USERS} 
       SET password_hash = ?, updated_at = ? 
       WHERE id = ?
     `;
-    const [result] = await connection.execute(sql, [passwordHash, new Date(), userId]);
     
-    if ((result as any).affectedRows === 0) {
-      throw new Error('用户不存在');
+    if (isSQLite) {
+      const result = connection.prepare(sql).run(passwordHash, new Date().toISOString(), userId);
+      if (result.changes === 0) {
+        throw new Error('用户不存在');
+      }
+    } else {
+      const [result] = await connection.execute(sql, [passwordHash, new Date(), userId]);
+      if ((result as any).affectedRows === 0) {
+        throw new Error('用户不存在');
+      }
     }
 
     console.log(`用户密码已重置: ${userId}`);

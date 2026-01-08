@@ -3,7 +3,7 @@
  * 提供数据统计和分析功能的高级接口
  */
 
-import { databaseService } from './databaseService';
+import { databaseManager } from './databaseManager';
 import { 
   ImageStatistics, 
   DatabaseStatistics, 
@@ -11,7 +11,7 @@ import {
   OperationLog,
   PaginationOptions,
   PaginatedResult
-} from '../types';
+} from '@shared/types';
 
 /**
  * 统计服务类
@@ -25,7 +25,7 @@ export class StatisticsService {
   async getImageOverview(): Promise<ImageStatistics> {
     try {
       console.log('获取图片统计概览...');
-      const stats = await databaseService.getImageStatistics();
+      const stats = await databaseManager.getImageStatistics();
       console.log('图片统计概览获取成功:', {
         总图片数: stats.totalImages,
         收藏图片: stats.favoriteImages,
@@ -53,7 +53,7 @@ export class StatisticsService {
         }
       };
       
-      const stats = await databaseService.getImageStatistics(filter);
+      const stats = await databaseManager.getImageStatistics(filter);
       console.log('时间范围统计获取成功:', {
         时间范围: `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`,
         图片数量: stats.totalImages,
@@ -78,7 +78,7 @@ export class StatisticsService {
         models
       };
       
-      const stats = await databaseService.getImageStatistics(filter);
+      const stats = await databaseManager.getImageStatistics(filter);
       console.log('模型统计获取成功:', {
         筛选模型: models,
         图片数量: stats.totalImages,
@@ -103,7 +103,7 @@ export class StatisticsService {
         favorite: true
       };
       
-      const stats = await databaseService.getImageStatistics(filter);
+      const stats = await databaseManager.getImageStatistics(filter);
       console.log('收藏图片统计获取成功:', {
         收藏图片数: stats.totalImages,
         模型分布: stats.byModel,
@@ -128,8 +128,8 @@ export class StatisticsService {
       console.log('获取OSS上传状态统计...');
       
       const [uploadedStats, pendingStats] = await Promise.all([
-        databaseService.getImageStatistics({ ossUploaded: true }),
-        databaseService.getImageStatistics({ ossUploaded: false })
+        databaseManager.getImageStatistics({ ossUploaded: true }),
+        databaseManager.getImageStatistics({ ossUploaded: false })
       ]);
       
       console.log('OSS上传状态统计获取成功:', {
@@ -153,7 +153,7 @@ export class StatisticsService {
   async getDatabaseOverview(): Promise<DatabaseStatistics> {
     try {
       console.log('获取数据库统计概览...');
-      const stats = await databaseService.getDatabaseStatistics();
+      const stats = await databaseManager.getDatabaseStatistics();
       
       console.log('数据库统计概览获取成功:', {
         图片总数: stats.images.totalImages,
@@ -194,12 +194,12 @@ export class StatisticsService {
       };
       
       const [imageStats, dbStats] = await Promise.all([
-        databaseService.getImageStatistics(filter),
-        databaseService.getDatabaseStatistics(filter)
+        databaseManager.getImageStatistics(filter),
+        databaseManager.getDatabaseStatistics(filter)
       ]);
       
       // 获取今日操作日志
-      const operationLogs = await databaseService.getOperationLogs({
+      const operationLogs = await databaseManager.getOperationLogs({
         page: 1,
         pageSize: 1000,
         sortBy: 'created_at',
@@ -244,7 +244,7 @@ export class StatisticsService {
     try {
       console.log(`获取最近 ${limit} 条操作日志...`);
       
-      const result = await databaseService.getOperationLogs({
+      const result = await databaseManager.getOperationLogs({
         page: 1,
         pageSize: limit,
         sortBy: 'created_at',
@@ -267,7 +267,7 @@ export class StatisticsService {
     try {
       console.log(`获取最近 ${limit} 条错误操作日志...`);
       
-      const result = await databaseService.getOperationLogs({
+      const result = await databaseManager.getOperationLogs({
         page: 1,
         pageSize: limit,
         sortBy: 'created_at',

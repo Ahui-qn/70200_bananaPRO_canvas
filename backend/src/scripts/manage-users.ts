@@ -12,6 +12,7 @@
  */
 
 import dotenv from 'dotenv';
+import { databaseManager } from '../services/databaseManager.js';
 import { databaseService } from '../services/databaseService.js';
 import { userService } from '../services/userService.js';
 
@@ -35,9 +36,19 @@ function parseArgs(): Record<string, string> {
 }
 
 /**
- * 连接数据库
+ * 连接数据库（支持 MySQL 和 SQLite 双模式）
  */
 async function connectDatabase(): Promise<boolean> {
+  const databaseMode = process.env.DATABASE_MODE?.toLowerCase();
+  
+  if (databaseMode === 'sqlite') {
+    // SQLite 模式
+    console.log('📦 使用 SQLite 数据库模式');
+    return await databaseManager.initialize();
+  }
+  
+  // MySQL 模式
+  console.log('☁️ 使用 MySQL 数据库模式');
   const dbHost = process.env.DB_HOST;
   const dbPort = process.env.DB_PORT;
   const dbDatabase = process.env.DB_DATABASE;
@@ -216,11 +227,18 @@ async function setUserRole(args: Record<string, string>): Promise<void> {
       process.exit(1);
     }
 
-    // 直接更新数据库中的用户角色
-    await databaseService.executeQuery(
-      'UPDATE users SET role = ? WHERE id = ?',
-      [role, user.id]
-    );
+    // 根据数据库模式使用不同的方法更新角色
+    const isSQLite = databaseManager.getMode() === 'sqlite';
+    const connection = databaseManager.getConnection();
+    
+    if (isSQLite) {
+      connection.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, user.id);
+    } else {
+      await databaseService.executeQuery(
+        'UPDATE users SET role = ? WHERE id = ?',
+        [role, user.id]
+      );
+    }
 
     console.log(`✅ 用户角色已更新: ${username} -> ${role}`);
   } catch (error: any) {
@@ -347,7 +365,11 @@ async function main(): Promise<void> {
     }
   } finally {
     // 断开数据库连接
-    await databaseService.disconnect();
+    if (databaseManager.getMode() === 'sqlite') {
+      await databaseManager.disconnect();
+    } else {
+      await databaseService.disconnect();
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { SavedImage } from '../types';
+import { SavedImage } from '@shared/types';
 import { imageStorage } from './imageStorage';
 import { databaseStorage, loadDatabaseConfig } from './databaseStorage';
 

@@ -3,7 +3,7 @@
  * 处理环境变量和数据库连接配置
  */
 
-import { DatabaseConfig, EnvironmentConfig } from '../types';
+import { DatabaseConfig, EnvironmentConfig } from '@shared/types';
 
 /**
  * 从环境变量加载配置

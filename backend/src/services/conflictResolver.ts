@@ -3,7 +3,7 @@
  * 实现基于时间戳的冲突检测和解决机制
  */
 
-import { SavedImage, ApiConfig, OSSConfig, OperationLog } from '../types';
+import { SavedImage, ApiConfig, OSSConfig, OperationLog } from '@shared/types';
 
 /**
  * 冲突类型枚举

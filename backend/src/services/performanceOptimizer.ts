@@ -10,7 +10,7 @@ import {
   DatabaseService,
   ImageStatistics,
   DatabaseStatistics
-} from '../types';
+} from '@shared/types';
 
 // 缓存项接口
 interface CacheItem<T> {

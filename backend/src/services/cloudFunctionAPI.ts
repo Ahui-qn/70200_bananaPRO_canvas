@@ -9,7 +9,7 @@ import {
   DatabaseConfig, 
   SavedImage,
   PaginationOptions 
-} from '../types';
+} from '@shared/types';
 import { loadEnvironmentConfig, CONFIG_CONSTANTS } from '../config/database';
 import { networkErrorHandler } from './networkErrorHandler';
 import { databaseErrorHandler } from './databaseErrorHandler';

@@ -1,6 +1,7 @@
 import express from 'express';
 import { ApiResponse } from '@shared/types';
-import { aliOssService } from '../services/aliOssService';
+import { storageManager } from '../services/storageManager';
+import { databaseManager } from '../services/databaseManager';
 
 const router = express.Router();
 
@@ -19,37 +20,81 @@ function getApiConfigFromEnv() {
 }
 
 /**
- * 从环境变量获取数据库配置（只读）
- * 只展示主机地址、端口和数据库名称，隐藏敏感信息
+ * 获取数据库配置（根据当前模式返回不同信息）
  */
 function getDatabaseConfigFromEnv() {
+  const dbMode = databaseManager.getMode();
+  
+  if (dbMode === 'sqlite') {
+    return {
+      mode: 'sqlite',
+      modeName: '本地 SQLite',
+      path: process.env.SQLITE_PATH || './data/database.sqlite',
+      isLocal: true
+    };
+  }
+  
   return {
+    mode: 'mysql',
+    modeName: '云端 MySQL',
     host: process.env.DB_HOST || '未配置',
     port: parseInt(process.env.DB_PORT || '3306'),
     database: process.env.DB_DATABASE || '未配置',
+    isLocal: false
   };
 }
 
 /**
- * 从环境变量获取 OSS 配置（只读）
- * 只展示区域和存储桶名称，隐藏敏感信息
+ * 获取存储配置（根据当前模式返回不同信息）
  */
-function getOSSConfigFromEnv() {
+function getStorageConfigFromEnv() {
+  const storageMode = storageManager.getMode();
+  
+  if (storageMode === 'local') {
+    return {
+      mode: 'local',
+      modeName: '本地存储',
+      path: process.env.LOCAL_STORAGE_PATH || '未配置',
+      serverUrl: process.env.LOCAL_SERVER_URL || '未配置',
+      isLocal: true
+    };
+  }
+  
   return {
+    mode: 'oss',
+    modeName: '阿里云 OSS',
     region: process.env.OSS_REGION || '未配置',
     bucket: process.env.OSS_BUCKET || '未配置',
+    isLocal: false
   };
 }
 
 // 获取所有配置（只读，从 .env 文件读取）
 router.get('/', async (_req, res) => {
   try {
+    const dbConfig = getDatabaseConfigFromEnv();
+    const storageConfig = getStorageConfigFromEnv();
+    
     const response: ApiResponse = {
       success: true,
       data: {
         apiConfig: getApiConfigFromEnv(),
-        databaseConfig: getDatabaseConfigFromEnv(),
-        ossConfig: getOSSConfigFromEnv(),
+        databaseConfig: dbConfig,
+        storageConfig: storageConfig,
+        // 兼容旧的 ossConfig 字段
+        ossConfig: storageConfig.mode === 'oss' ? {
+          region: storageConfig.region,
+          bucket: storageConfig.bucket
+        } : null,
+        // 运行模式信息
+        runMode: {
+          database: dbConfig.mode,
+          storage: storageConfig.mode,
+          isLocalMode: dbConfig.isLocal && storageConfig.isLocal,
+          description: dbConfig.isLocal && storageConfig.isLocal 
+            ? '本地模式（SQLite + 本地存储）' 
+            : '云端模式（MySQL + OSS）'
+        },
         readOnly: true,
         message: '配置信息从 .env 文件读取，前端不可修改'
       }
@@ -104,28 +149,107 @@ router.get('/database', async (_req, res) => {
   }
 });
 
-// 获取 OSS 配置（只读）
-router.get('/oss', async (_req, res) => {
+// 获取存储配置（只读）
+router.get('/storage', async (_req, res) => {
   try {
     const response: ApiResponse = {
       success: true,
-      data: getOSSConfigFromEnv()
+      data: getStorageConfigFromEnv()
     };
 
     res.json(response);
   } catch (error: any) {
-    console.error('获取 OSS 配置失败:', error);
+    console.error('获取存储配置失败:', error);
     const response: ApiResponse = {
       success: false,
-      error: error.message || '获取 OSS 配置失败'
+      error: error.message || '获取存储配置失败'
     };
     res.status(500).json(response);
   }
 });
 
-// 获取 OSS 连接状态（真正测试连接）
+// 获取 OSS 配置（只读，兼容旧接口）
+router.get('/oss', async (_req, res) => {
+  try {
+    const storageConfig = getStorageConfigFromEnv();
+    
+    // 如果是本地模式，返回本地存储信息
+    if (storageConfig.mode === 'local') {
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          mode: 'local',
+          modeName: '本地存储',
+          path: storageConfig.path,
+          serverUrl: storageConfig.serverUrl,
+          isLocal: true
+        }
+      };
+      return res.json(response);
+    }
+    
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        mode: 'oss',
+        modeName: '阿里云 OSS',
+        region: storageConfig.region,
+        bucket: storageConfig.bucket,
+        isLocal: false
+      }
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('获取存储配置失败:', error);
+    const response: ApiResponse = {
+      success: false,
+      error: error.message || '获取存储配置失败'
+    };
+    res.status(500).json(response);
+  }
+});
+
+// 获取存储连接状态（真正测试连接）
 router.get('/oss/status', async (_req, res) => {
   try {
+    const storageMode = storageManager.getMode();
+    
+    // 本地模式：检查本地存储路径是否可用
+    if (storageMode === 'local') {
+      const localPath = process.env.LOCAL_STORAGE_PATH;
+      
+      if (!localPath) {
+        const response: ApiResponse = {
+          success: true,
+          data: {
+            isConnected: false,
+            mode: 'local',
+            status: 'not_configured',
+            message: '本地存储路径未配置，请检查 .env 文件中的 LOCAL_STORAGE_PATH'
+          }
+        };
+        return res.json(response);
+      }
+      
+      // 检查路径是否存在
+      const fs = await import('fs');
+      const pathExists = fs.existsSync(localPath);
+      
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          isConnected: pathExists,
+          mode: 'local',
+          status: pathExists ? 'connected' : 'path_not_found',
+          message: pathExists ? '本地存储正常' : `本地存储路径不存在: ${localPath}`,
+          path: localPath
+        }
+      };
+      return res.json(response);
+    }
+    
+    // OSS 模式：原有逻辑
     const accessKeyId = process.env.OSS_ACCESS_KEY_ID;
     const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET;
     const bucket = process.env.OSS_BUCKET;
@@ -146,14 +270,14 @@ router.get('/oss/status', async (_req, res) => {
       return res.json(response);
     }
     
-    // 确保 OSS 服务已初始化
-    if (!aliOssService.isConfigured()) {
-      aliOssService.initialize();
+    // 确保存储服务已初始化
+    if (!storageManager.isConfigured()) {
+      storageManager.initialize();
     }
     
-    // 真正测试 OSS 连接
+    // 真正测试存储连接
     try {
-      const isConnected = await aliOssService.testConnection();
+      const isConnected = await storageManager.testConnection();
       
       const response: ApiResponse = {
         success: true,

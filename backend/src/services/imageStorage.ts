@@ -1,4 +1,4 @@
-import { SavedImage, ImageLibrary } from '../types';
+import { SavedImage, ImageLibrary } from '@shared/types';
 
 const STORAGE_KEY = 'nano-banana-images';
 const MAX_IMAGES = 1000; // 最大存储图片数量

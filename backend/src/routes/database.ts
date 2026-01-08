@@ -1,6 +1,6 @@
 import express from 'express';
 import { ApiResponse, DatabaseStatistics, DatabaseConfig } from '@shared/types';
-import { databaseService } from '../services/databaseService.js';
+import { databaseManager } from '../services/databaseManager.js';
 
 const router = express.Router();
 
@@ -22,9 +22,32 @@ function getDatabaseConfigFromEnv(): DatabaseConfig {
 // 获取数据库状态（包含 .env 配置信息）
 router.get('/status', async (req, res) => {
   try {
-    const status = databaseService.getConnectionStatus();
+    const status = databaseManager.getConnectionStatus();
+    const dbMode = databaseManager.getMode();
+    
+    // 根据数据库模式返回不同的配置信息
+    if (dbMode === 'sqlite') {
+      const sqlitePath = process.env.SQLITE_PATH || './data/database.sqlite';
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          isConnected: status.isConnected,
+          connectionInfo: status.isConnected ? `SQLite: ${sqlitePath}` : undefined,
+          config: {
+            mode: 'sqlite',
+            modeName: '本地 SQLite',
+            path: sqlitePath,
+            isLocal: true
+          },
+          isConfigured: true,
+          readOnly: true
+        }
+      };
+      return res.json(response);
+    }
+    
+    // MySQL 模式
     const envConfig = getDatabaseConfigFromEnv();
-
     const response: ApiResponse = {
       success: true,
       data: {
@@ -32,16 +55,16 @@ router.get('/status', async (req, res) => {
         connectionInfo: status.isConnected 
           ? `${envConfig.host}:${envConfig.port}/${envConfig.database}`
           : undefined,
-        lastError: status.lastError,
-        connectedAt: status.connectedAt,
-        // 返回 .env 配置（密码隐藏）
         config: {
+          mode: 'mysql',
+          modeName: '云端 MySQL',
           host: envConfig.host,
           port: envConfig.port,
           database: envConfig.database,
           username: envConfig.username,
           password: envConfig.password ? '******' : '',
-          ssl: envConfig.ssl
+          ssl: envConfig.ssl,
+          isLocal: false
         },
         isConfigured: !!(envConfig.host && envConfig.database && envConfig.username),
         readOnly: true
@@ -62,7 +85,7 @@ router.get('/status', async (req, res) => {
 // 初始化数据库
 router.post('/init', async (req, res) => {
   try {
-    await databaseService.initializeTables();
+    await databaseManager.initializeTables();
 
     const response: ApiResponse = {
       success: true,
@@ -83,7 +106,7 @@ router.post('/init', async (req, res) => {
 // 获取数据库统计信息
 router.get('/stats', async (req, res) => {
   try {
-    const stats = await databaseService.getDatabaseStatistics();
+    const stats = await databaseManager.getDatabaseStatistics();
 
     const response: ApiResponse<DatabaseStatistics> = {
       success: true,
@@ -104,6 +127,26 @@ router.get('/stats', async (req, res) => {
 // 测试数据库连接（使用 .env 配置）
 router.post('/test', async (_req, res) => {
   try {
+    const dbMode = databaseManager.getMode();
+    
+    // SQLite 模式：直接测试当前连接
+    if (dbMode === 'sqlite') {
+      const status = databaseManager.getConnectionStatus();
+      const sqlitePath = process.env.SQLITE_PATH || './data/database.sqlite';
+      
+      const response: ApiResponse = {
+        success: status.isConnected,
+        data: {
+          success: status.isConnected,
+          latency: 0,
+          message: status.isConnected ? `SQLite 连接正常: ${sqlitePath}` : 'SQLite 连接失败'
+        },
+        message: status.isConnected ? '数据库连接测试成功' : '数据库连接测试失败'
+      };
+      return res.json(response);
+    }
+    
+    // MySQL 模式：使用环境变量配置测试
     const envConfig = getDatabaseConfigFromEnv();
     
     if (!envConfig.host || !envConfig.database || !envConfig.username) {
@@ -114,7 +157,7 @@ router.post('/test', async (_req, res) => {
       return res.status(400).json(response);
     }
 
-    const testResult = await databaseService.testConnection(envConfig);
+    const testResult = await databaseManager.testConnection(envConfig);
 
     const response: ApiResponse = {
       success: testResult.success,
@@ -146,7 +189,7 @@ router.post('/connect', async (_req, res) => {
       return res.status(400).json(response);
     }
 
-    await databaseService.connect(envConfig);
+    await databaseManager.connect(envConfig);
 
     const response: ApiResponse = {
       success: true,
@@ -167,7 +210,7 @@ router.post('/connect', async (_req, res) => {
 // 断开数据库连接
 router.post('/disconnect', async (req, res) => {
   try {
-    await databaseService.disconnect();
+    await databaseManager.disconnect();
 
     const response: ApiResponse = {
       success: true,
@@ -188,7 +231,7 @@ router.post('/disconnect', async (req, res) => {
 // 清除用户数据
 router.delete('/clear', async (req, res) => {
   try {
-    await databaseService.clearUserData();
+    await databaseManager.clearUserData();
 
     const response: ApiResponse = {
       success: true,
@@ -212,7 +255,7 @@ router.get('/logs', async (req, res) => {
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = parseInt(req.query.pageSize as string) || 50;
 
-    const logs = await databaseService.getOperationLogs({
+    const logs = await databaseManager.getOperationLogs({
       page,
       pageSize,
       sortBy: 'created_at',

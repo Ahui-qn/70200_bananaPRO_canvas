@@ -4,7 +4,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { databaseService } from './databaseService';
+import { databaseManager } from './databaseManager';
 import { TABLE_NAMES } from '../config/constants';
 
 // 项目接口
@@ -59,7 +59,7 @@ class ProjectService {
       VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)
     `;
 
-    await databaseService.executeQuery(sql, [
+    await databaseManager.executeQuery(sql, [
       projectId,
       request.name.trim(),
       request.description?.trim() || null,
@@ -108,7 +108,7 @@ class ProjectService {
       ORDER BY p.updated_at DESC
     `;
 
-    const rows = await databaseService.executeQuery(sql);
+    const rows = await databaseManager.executeQuery(sql);
     return this.mapRowsToProjects(rows as any[]);
   }
 
@@ -135,7 +135,7 @@ class ProjectService {
       WHERE p.id = ?
     `;
 
-    const rows = await databaseService.executeQuery(sql, [projectId]);
+    const rows = await databaseManager.executeQuery(sql, [projectId]);
     const projects = this.mapRowsToProjects(rows as any[]);
     return projects.length > 0 ? projects[0] : null;
   }
@@ -179,7 +179,7 @@ class ProjectService {
       WHERE id = ? AND is_deleted = FALSE
     `;
 
-    await databaseService.executeQuery(sql, values);
+    await databaseManager.executeQuery(sql, values);
     return this.getProjectById(projectId);
   }
 
@@ -195,7 +195,7 @@ class ProjectService {
       SET is_deleted = TRUE, deleted_at = ?, deleted_by = ?, updated_at = ?
       WHERE id = ? AND is_deleted = FALSE
     `;
-    await databaseService.executeQuery(projectSql, [now, deletedBy, now, projectId]);
+    await databaseManager.executeQuery(projectSql, [now, deletedBy, now, projectId]);
 
     // 级联软删除该项目下的所有图片
     const imagesSql = `
@@ -203,7 +203,7 @@ class ProjectService {
       SET is_deleted = TRUE, deleted_at = ?, deleted_by = ?
       WHERE project_id = ? AND is_deleted = FALSE
     `;
-    await databaseService.executeQuery(imagesSql, [now, deletedBy, projectId]);
+    await databaseManager.executeQuery(imagesSql, [now, deletedBy, projectId]);
 
     return true;
   }
@@ -214,7 +214,7 @@ class ProjectService {
   async getOrCreateDefaultProject(userId: string): Promise<Project> {
     // 先查找用户是否有当前项目
     const userSql = `SELECT current_project_id FROM ${TABLE_NAMES.USERS} WHERE id = ?`;
-    const userRows = await databaseService.executeQuery(userSql, [userId]);
+    const userRows = await databaseManager.executeQuery(userSql, [userId]);
     
     if ((userRows as any[]).length > 0 && (userRows as any[])[0].current_project_id) {
       const currentProjectId = (userRows as any[])[0].current_project_id;
@@ -231,7 +231,7 @@ class ProjectService {
       ORDER BY updated_at DESC
       LIMIT 1
     `;
-    const recentRows = await databaseService.executeQuery(recentSql, [userId]);
+    const recentRows = await databaseManager.executeQuery(recentSql, [userId]);
     
     if ((recentRows as any[]).length > 0) {
       const projectId = (recentRows as any[])[0].id;
@@ -246,7 +246,7 @@ class ProjectService {
       ORDER BY updated_at DESC
       LIMIT 1
     `;
-    const anyRows = await databaseService.executeQuery(anySql);
+    const anyRows = await databaseManager.executeQuery(anySql);
     
     if ((anyRows as any[]).length > 0) {
       const projectId = (anyRows as any[])[0].id;
@@ -273,7 +273,7 @@ class ProjectService {
       SET current_project_id = ?
       WHERE id = ?
     `;
-    await databaseService.executeQuery(sql, [projectId, userId]);
+    await databaseManager.executeQuery(sql, [projectId, userId]);
   }
 
   /**
@@ -281,7 +281,7 @@ class ProjectService {
    */
   async getCurrentProjectId(userId: string): Promise<string | null> {
     const sql = `SELECT current_project_id FROM ${TABLE_NAMES.USERS} WHERE id = ?`;
-    const rows = await databaseService.executeQuery(sql, [userId]);
+    const rows = await databaseManager.executeQuery(sql, [userId]);
     
     if ((rows as any[]).length > 0) {
       return (rows as any[])[0].current_project_id;
@@ -309,7 +309,7 @@ class ProjectService {
       SET updated_at = ?
       WHERE id = ?
     `;
-    await databaseService.executeQuery(updateSql, [new Date(), projectId]);
+    await databaseManager.executeQuery(updateSql, [new Date(), projectId]);
 
     return project;
   }
@@ -345,7 +345,7 @@ class ProjectService {
       WHERE id = ? AND is_deleted = FALSE
     `;
     
-    const rows = await databaseService.executeQuery(sql, [projectId]);
+    const rows = await databaseManager.executeQuery(sql, [projectId]);
     
     if ((rows as any[]).length === 0) {
       return null;
@@ -392,7 +392,7 @@ class ProjectService {
       WHERE id = ? AND is_deleted = FALSE
     `;
     
-    await databaseService.executeQuery(sql, [
+    await databaseManager.executeQuery(sql, [
       JSON.stringify(canvasState),
       new Date(),
       projectId
@@ -437,7 +437,7 @@ class ProjectService {
       ORDER BY created_at DESC
     `;
     
-    const imageRows = await databaseService.executeQuery(imagesSql, [projectId]);
+    const imageRows = await databaseManager.executeQuery(imagesSql, [projectId]);
     
     // 转换图片数据（包含实际尺寸、状态和参考图）
     const images = (imageRows as any[]).map(row => {

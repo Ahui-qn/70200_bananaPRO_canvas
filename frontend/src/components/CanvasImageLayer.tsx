@@ -11,6 +11,7 @@ import React, { useMemo, useCallback, useEffect, useState } from 'react';
 import { CanvasImage, Viewport } from '../../../shared/types';
 import { getVisibleImages } from '../hooks/useCanvasImages';
 import { imageLoadingManager, LoadingState, ImageSourceType } from '../services/imageLoadingManager';
+import { downloadImage, generateDownloadFilename } from '../utils/downloadUtils';
 import {
   Heart,
   Download,
@@ -642,11 +643,8 @@ export const CanvasImageLayer: React.FC<CanvasImageLayerProps> = ({
     if (onDownloadImage) {
       onDownloadImage(image);
     } else {
-      // 默认下载行为
-      const link = document.createElement('a');
-      link.href = image.url;
-      link.download = `nano-banana-${image.id}.jpg`;
-      link.click();
+      // 使用 blob 方式下载，触发系统保存对话框
+      downloadImage(image.url, generateDownloadFilename(image.id));
     }
   }, [onDownloadImage]);
 

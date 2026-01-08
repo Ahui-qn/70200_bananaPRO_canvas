@@ -3,7 +3,7 @@
  * 提供自动重试机制和指数退避策略
  */
 
-import { NetworkErrorHandler } from '../types';
+import { NetworkErrorHandler } from '@shared/types';
 import { DEFAULT_VALUES, ERROR_MESSAGES } from '../config/constants';
 
 /**

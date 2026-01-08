@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/api';
 import { SavedImage } from '../../../shared/types';
+import { downloadImage, generateDownloadFilename } from '../utils/downloadUtils';
 import {
   X,
   Image as ImageIcon,
@@ -123,13 +124,8 @@ export const ImageLibraryModal: React.FC<ImageLibraryModalProps> = ({
   };
 
   const handleDownload = (image: SavedImage) => {
-    const link = document.createElement('a');
-    link.href = image.url;
-    link.download = `nano-banana-${image.id}.jpg`;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // 使用 blob 方式下载，触发系统保存对话框
+    downloadImage(image.url, generateDownloadFilename(image.id));
   };
 
   const formatDate = (date: Date | string) => {

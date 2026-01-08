@@ -1,4 +1,4 @@
-import { SavedImage } from '../types';
+import { SavedImage } from '@shared/types';
 
 /**
  * 数据库配置接口

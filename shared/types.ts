@@ -74,9 +74,11 @@ export interface OSSConfig {
   bucket: string;
   accessKeyId: string;
   accessKeySecret: string;
-  endpoint: string;
+  endpoint?: string;          // 可选的自定义端点
   customDomain?: string;
   enabled: boolean;
+  secure?: boolean;           // 是否使用 HTTPS
+  pathStyle?: boolean;        // 是否使用路径风格
 }
 
 // 图片生成状态
@@ -159,18 +161,52 @@ export interface NanoBananaResultResponse {
 // 统计信息
 export interface ImageStatistics {
   totalImages: number;
-  favoriteImages: number;
-  modelStats: Record<string, number>;
-  recentImages: number;
-  ossUploadedImages: number;
+  favoriteImages?: number;
+  modelStats?: Record<string, number>;
+  recentImages?: number;
+  ossUploadedImages?: number;
+  uploadedToOSS?: number;           // 已上传到 OSS 的数量
+  pendingOSSUpload?: number;        // 待上传到 OSS 的数量
+  byModel?: Record<string, number>; // 按模型统计
+  byTimeRange?: {                   // 按时间范围统计
+    today: number;
+    thisWeek: number;
+    thisMonth: number;
+    thisYear: number;
+  };
+  byStatus?: {                      // 按状态统计
+    favorite: number;
+    uploaded: number;
+    pending: number;
+  };
 }
 
 // 数据库统计
 export interface DatabaseStatistics {
-  connectionStatus: 'connected' | 'disconnected' | 'error';
-  totalRecords: number;
+  connectionStatus?: 'connected' | 'disconnected' | 'error';
+  totalRecords?: number;
   lastBackup?: Date;
   storageSize?: number;
+  images?: ImageStatistics | number;  // 图片统计或图片总数
+  users?: number;                     // 用户总数
+  projects?: number;                  // 项目总数
+  operations?: {                      // 操作统计
+    totalOperations: number;
+    successfulOperations: number;
+    failedOperations: number;
+    recentOperations: number;
+    byOperation?: Record<string, number>;
+  };
+  storage?: {                         // 存储统计
+    totalSize: number;
+    averageImageSize: number;
+    largestImage: number;
+  };
+  performance?: {                     // 性能统计
+    averageResponseTime: number;
+    slowestOperation: number;
+    fastestOperation: number;
+  };
 }
 
 // 操作日志
@@ -387,4 +423,112 @@ export interface CanvasImage extends SavedImage {
   x?: number;                    // 运行时 X 坐标（与 canvasX 同步）
   y?: number;                    // 运行时 Y 坐标（与 canvasY 同步）
   isFailed?: boolean;            // 是否生成失败（运行时状态，与 status 同步）
+}
+
+
+// ============================================
+// 数据库服务类型定义
+// ============================================
+
+// 连接状态
+export interface ConnectionStatus {
+  isConnected: boolean;
+  lastConnected: Date | null;
+  error: string | null;
+  latency?: number;
+}
+
+// 分页选项
+export interface PaginationOptions {
+  page: number;
+  pageSize: number;
+  sortBy?: string;
+  sortOrder?: 'ASC' | 'DESC';
+  filters?: Record<string, any>;
+}
+
+// 分页结果
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+// 数据库错误
+export interface DatabaseError extends Error {
+  code?: string;
+  sqlState?: string;
+  errno?: number;
+}
+
+// 统计筛选条件
+export interface StatisticsFilter {
+  startDate?: Date;
+  endDate?: Date;
+  model?: string;
+  models?: string[];           // 多个模型筛选
+  userId?: string;
+  dateRange?: {                // 日期范围
+    start: Date;
+    end: Date;
+  };
+  favorite?: boolean;          // 是否收藏
+  ossUploaded?: boolean;       // 是否已上传到 OSS
+}
+
+// 环境配置
+export interface EnvironmentConfig {
+  nodeEnv: string;
+  port: number;
+  frontendUrl: string;
+  databaseConfig: DatabaseConfig;
+}
+
+// 加密服务接口
+export interface EncryptionService {
+  encrypt(data: string): string;
+  decrypt(encryptedData: string): string;
+}
+
+// 网络错误处理器接口
+export interface NetworkErrorHandler {
+  handleError(error: any): void;
+  isNetworkError(error: any): boolean;
+  shouldRetry(error: any): boolean;
+}
+
+// 图片库接口（本地存储用）
+export interface ImageLibrary {
+  images: SavedImage[];
+  lastUpdated: Date;
+}
+
+// 数据库服务接口
+export interface DatabaseService {
+  connect(config: DatabaseConfig): Promise<boolean>;
+  disconnect(): Promise<void>;
+  testConnection(config?: DatabaseConfig): Promise<boolean | { success: boolean; latency?: number; error?: string }>;
+  getConnectionStatus(): ConnectionStatus;
+  getConnection(): any;
+  executeQuery(sql: string, params?: any[]): Promise<any[]>;
+  saveImage(image: SavedImage): Promise<SavedImage>;
+  getImages(pagination: PaginationOptions): Promise<PaginatedResult<SavedImage>>;
+  getImageById(id: string): Promise<SavedImage | null>;
+  updateImage(id: string, updates: Partial<SavedImage>): Promise<SavedImage>;
+  updateImageCanvasPosition(id: string, canvasX: number, canvasY: number): Promise<SavedImage>;
+  deleteImage(id: string, cascadeDelete?: boolean): Promise<void>;
+  deleteImages(ids: string[], cascadeDelete?: boolean): Promise<{ successful: string[]; failed: { id: string; error: string }[] }>;
+  saveApiConfig(config: ApiConfig): Promise<void>;
+  getApiConfig(): Promise<ApiConfig | null>;
+  saveOSSConfig(config: OSSConfig): Promise<void>;
+  getOSSConfig(): Promise<OSSConfig | null>;
+  deleteApiConfig(requireConfirmation?: boolean): Promise<void>;
+  deleteOSSConfig(requireConfirmation?: boolean): Promise<void>;
+  deleteAllConfigs(requireConfirmation?: boolean): Promise<void>;
+  clearUserData(requireConfirmation?: boolean): Promise<void>;
+  initializeTables(): Promise<void>;
 }

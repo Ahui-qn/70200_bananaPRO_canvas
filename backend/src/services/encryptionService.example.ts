@@ -4,7 +4,7 @@
  */
 
 import { AESEncryptionService, getEncryptionService } from './encryptionService';
-import { ApiConfig, OSSConfig } from '../types';
+import { ApiConfig, OSSConfig } from '@shared/types';
 
 // 示例：加密和存储 API 配置
 export function encryptApiConfig(apiConfig: ApiConfig): string {

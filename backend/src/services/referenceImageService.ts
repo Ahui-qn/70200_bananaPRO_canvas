@@ -4,8 +4,8 @@
  */
 
 import crypto from 'crypto';
-import { aliOssService } from './aliOssService.js';
-import { databaseService } from './databaseService.js';
+import { storageManager } from './storageManager.js';
+import { databaseManager } from './databaseManager.js';
 
 // 参考图片记录接口
 export interface ReferenceImage {
@@ -100,19 +100,19 @@ class ReferenceImageService {
       };
     }
 
-    // 上传到 OSS
-    if (!aliOssService.isConfigured()) {
-      throw new Error('OSS 服务未配置，无法上传参考图片');
+    // 上传到存储服务
+    if (!storageManager.isConfigured()) {
+      throw new Error('存储服务未配置，无法上传参考图片');
     }
 
     const ossKey = this.generateOssKey(hash, mimeType);
-    const uploadResult = await aliOssService.uploadFromBuffer(buffer, mimeType, ossKey);
+    const uploadResult = await storageManager.uploadFromBuffer(buffer, mimeType, ossKey);
 
     // 保存到数据库
     const refImage: ReferenceImage = {
       id: `ref_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       hash,
-      ossKey: uploadResult.ossKey,
+      ossKey: uploadResult.key,
       ossUrl: uploadResult.url,
       originalName,
       size: buffer.length,
@@ -311,8 +311,8 @@ class ReferenceImageService {
 
     for (const row of toDelete) {
       try {
-        // 删除 OSS 文件
-        await aliOssService.deleteObject(row.oss_key);
+        // 删除存储文件
+        await storageManager.deleteObject(row.oss_key);
         
         // 删除数据库记录
         await connection.execute('DELETE FROM reference_images WHERE id = ?', [row.id]);

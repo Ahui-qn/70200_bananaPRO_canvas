@@ -4,7 +4,7 @@ import {
   NanoBananaResultRequest, 
   NanoBananaResultResponse,
   ApiConfig
-} from '../types';
+} from '@shared/types';
 import { fetchWithNetworkRetry } from './networkErrorHandler';
 
 // 获取请求头的辅助函数

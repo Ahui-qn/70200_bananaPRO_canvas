@@ -1,5 +1,5 @@
 import * as CryptoJS from 'crypto-js';
-import { EncryptionService } from '../types';
+import { EncryptionService } from '@shared/types';
 
 /**
  * AES-256 加密服务实现

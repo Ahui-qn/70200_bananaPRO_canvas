@@ -1,4 +1,4 @@
-import { SavedImage } from '../types';
+import { SavedImage } from '@shared/types';
 
 /**
  * 阿里云 OSS 配置接口

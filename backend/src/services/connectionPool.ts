@@ -4,7 +4,7 @@
  */
 
 import mysql from 'mysql2/promise';
-import { DatabaseConfig } from '../types';
+import { DatabaseConfig } from '@shared/types';
 import { createConnectionOptions } from '../utils/database';
 
 // 连接池配置接口

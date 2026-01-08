@@ -19,9 +19,13 @@ interface DatabaseConfigModalProps {
 }
 
 interface DatabaseConfigDisplay {
-  host: string;
-  port: number;
-  database: string;
+  mode: string;
+  modeName: string;
+  host?: string;
+  port?: number;
+  database?: string;
+  path?: string;
+  isLocal: boolean;
 }
 
 export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
@@ -33,9 +37,12 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
   const isAdmin = user?.role === 'admin';
   
   const [config, setConfig] = useState<DatabaseConfigDisplay>({
+    mode: 'mysql',
+    modeName: '云端 MySQL',
     host: '',
     port: 3306,
     database: '',
+    isLocal: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -68,10 +75,15 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
         });
 
         if (response.data.config) {
+          const configData = response.data.config;
           setConfig({
-            host: response.data.config.host || '',
-            port: response.data.config.port || 3306,
-            database: response.data.config.database || '',
+            mode: configData.mode || 'mysql',
+            modeName: configData.modeName || '云端 MySQL',
+            host: configData.host || '',
+            port: configData.port || 3306,
+            database: configData.database || '',
+            path: configData.path || '',
+            isLocal: configData.isLocal || false,
           });
         }
 
@@ -193,11 +205,11 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
         {/* 头部 */}
         <div className="flex items-center justify-between p-5 border-b border-zinc-800/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-              <Database className="w-5 h-5 text-emerald-400" />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.isLocal ? 'bg-blue-500/20' : 'bg-emerald-500/20'}`}>
+              <Database className={`w-5 h-5 ${config.isLocal ? 'text-blue-400' : 'text-emerald-400'}`} />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-zinc-100">数据库配置</h2>
+              <h2 className="text-base font-semibold text-zinc-100">{config.modeName || '数据库配置'}</h2>
               <p className="text-xs text-zinc-500 flex items-center gap-1">
                 <Lock className="w-3 h-3" />
                 只读模式
@@ -255,36 +267,55 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              {/* 本地 SQLite 模式 */}
+              {config.isLocal ? (
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-2">主机地址</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-2">数据库路径</label>
                   <input
                     type="text"
-                    value={config.host}
+                    value={config.path || ''}
                     readOnly
                     className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
                   />
+                  <p className="text-xs text-blue-400 mt-2 flex items-center gap-1">
+                    💾 本地 SQLite 数据库，数据存储在本地文件
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-2">端口</label>
-                  <input
-                    type="text"
-                    value={config.port}
-                    readOnly
-                    className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
-                  />
-                </div>
-              </div>
+              ) : (
+                /* 云端 MySQL 模式 */
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-400 mb-2">主机地址</label>
+                      <input
+                        type="text"
+                        value={config.host || ''}
+                        readOnly
+                        className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-400 mb-2">端口</label>
+                      <input
+                        type="text"
+                        value={config.port || 3306}
+                        readOnly
+                        className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
+                      />
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-2">数据库名</label>
-                <input
-                  type="text"
-                  value={config.database}
-                  readOnly
-                  className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-2">数据库名</label>
+                    <input
+                      type="text"
+                      value={config.database || ''}
+                      readOnly
+                      className="input-glass w-full px-3 py-2 rounded-xl text-zinc-300 cursor-not-allowed text-sm"
+                    />
+                  </div>
+                </>
+              )}
             </>
           )}
 

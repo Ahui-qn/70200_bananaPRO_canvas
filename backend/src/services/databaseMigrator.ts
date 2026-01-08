@@ -4,7 +4,7 @@
  */
 
 import * as mysql from 'mysql2/promise';
-import { DatabaseConfig } from '../types';
+import { DatabaseConfig } from '@shared/types';
 
 /**
  * 数据库版本信息

@@ -18,7 +18,7 @@ import {
   ImageStatistics,
   DatabaseStatistics,
   StatisticsFilter
-} from '../types';
+} from '@shared/types';
 import { 
   validateDatabaseConfig,
   CONFIG_CONSTANTS

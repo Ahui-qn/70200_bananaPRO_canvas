@@ -1,8 +1,8 @@
 import express from 'express';
 import { ApiResponse, CreateImageRequest, NanoBananaResultData, SavedImage } from '@shared/types';
 import { nanoBananaService } from '../services/nanoBananaService.js';
-import { databaseService } from '../services/databaseService.js';
-import { aliOssService } from '../services/aliOssService.js';
+import { databaseManager } from '../services/databaseManager.js';
+import { storageManager } from '../services/storageManager.js';
 import { referenceImageService } from '../services/referenceImageService.js';
 import { imageDimensionService } from '../services/imageDimensionService.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -165,50 +165,50 @@ router.post('/:taskId/save', async (req, res) => {
       imageHeight = processedImage.dimensions.height;
       console.log(`图片实际尺寸: ${imageWidth}x${imageHeight}`);
 
-      // 尝试上传到 OSS
-      if (aliOssService.isConfigured()) {
+      // 尝试上传到存储服务
+      if (storageManager.isConfigured()) {
         try {
-          console.log('开始上传图片到 OSS...');
+          console.log('开始上传图片到存储服务...');
           // 上传原图
-          const uploadResult = await aliOssService.uploadFromBuffer(
+          const uploadResult = await storageManager.uploadFromBuffer(
             processedImage.buffer,
             'image/jpeg'
           );
           finalUrl = uploadResult.url;
-          ossKey = uploadResult.ossKey;
+          ossKey = uploadResult.key;
           ossUploaded = true;
-          console.log('原图上传到 OSS 成功:', finalUrl);
+          console.log('原图上传成功:', finalUrl);
 
           // 上传缩略图
           try {
-            const thumbResult = await aliOssService.uploadThumbnail(
+            const thumbResult = await storageManager.uploadThumbnail(
               processedImage.thumbnail.buffer,
-              uploadResult.ossKey
+              uploadResult.key
             );
             thumbnailUrl = thumbResult.url;
-            console.log('缩略图上传到 OSS 成功:', thumbnailUrl);
+            console.log('缩略图上传成功:', thumbnailUrl);
           } catch (thumbError: any) {
             console.warn('缩略图上传失败:', thumbError.message);
             // 缩略图上传失败不影响主流程
           }
-        } catch (ossError: any) {
-          console.warn('上传到 OSS 失败，使用原始 URL:', ossError.message);
-          // OSS 上传失败时继续使用原始 URL
+        } catch (storageError: any) {
+          console.warn('上传到存储服务失败，使用原始 URL:', storageError.message);
+          // 存储上传失败时继续使用原始 URL
         }
       } else {
-        console.log('OSS 未配置，使用原始 URL');
+        console.log('存储服务未配置，使用原始 URL');
       }
     } catch (processError: any) {
       console.warn('图片处理失败，使用原始 URL 和预设尺寸:', processError.message);
       // 图片处理失败时，尝试直接上传原始 URL
-      if (aliOssService.isConfigured()) {
+      if (storageManager.isConfigured()) {
         try {
-          const uploadResult = await aliOssService.uploadFromUrl(imageUrl);
+          const uploadResult = await storageManager.uploadFromUrl(imageUrl);
           finalUrl = uploadResult.url;
-          ossKey = uploadResult.ossKey;
+          ossKey = uploadResult.key;
           ossUploaded = true;
-        } catch (ossError: any) {
-          console.warn('上传到 OSS 失败，使用原始 URL:', ossError.message);
+        } catch (storageError: any) {
+          console.warn('上传到存储服务失败，使用原始 URL:', storageError.message);
         }
       }
       // 使用预设尺寸
@@ -281,7 +281,7 @@ router.post('/:taskId/save', async (req, res) => {
     };
 
     // 保存到数据库
-    const result = await databaseService.saveImage(savedImage);
+    const result = await databaseManager.saveImage(savedImage);
 
     const response: ApiResponse = {
       success: true,
@@ -360,7 +360,7 @@ router.post('/save-failed', async (req, res) => {
     };
 
     // 保存到数据库
-    const result = await databaseService.saveImage(failedImage);
+    const result = await databaseManager.saveImage(failedImage);
 
     const response: ApiResponse = {
       success: true,

@@ -1,7 +1,6 @@
 import express from 'express';
 import { ApiResponse, PaginatedResponse, SavedImage, GetImagesRequest, CreateImageRequest, UpdateImageRequest } from '@shared/types';
-import { databaseService } from '../services/databaseService.js';
-import { aliOssService } from '../services/aliOssService.js';
+import { databaseManager } from '../services/databaseManager.js';
 import { trashService } from '../services/trashService.js';
 
 const router = express.Router();
@@ -24,7 +23,7 @@ router.get('/', async (req, res) => {
       }
     };
 
-    const result = await databaseService.getImages({
+    const result = await databaseManager.getImages({
       page: query.page!,
       pageSize: query.pageSize!,
       sortBy: query.sortBy!,
@@ -51,7 +50,7 @@ router.get('/', async (req, res) => {
 // 获取单个图片
 router.get('/:id', async (req, res) => {
   try {
-    const image = await databaseService.getImageById(req.params.id);
+    const image = await databaseManager.getImageById(req.params.id);
     
     if (!image) {
       const response: ApiResponse = {
@@ -99,17 +98,15 @@ router.post('/', async (req, res) => {
       model: imageData.model,
       aspectRatio: imageData.aspectRatio || 'auto',
       imageSize: imageData.imageSize || '1K',
-      refImages: imageData.refImages ? imageData.refImages.map(base64 => ({
-        file: new File([], 'ref.jpg'),
-        base64,
-        preview: base64
-      })) : undefined,
+      // refImages 在创建时不需要存储完整的 UploadedImage 对象
+      // 实际的参考图数据会在生成时处理
+      refImages: undefined,
       createdAt: new Date(),
       favorite: false,
       ossUploaded: false
     };
 
-    const result = await databaseService.saveImage(savedImage);
+    const result = await databaseManager.saveImage(savedImage);
 
     const response: ApiResponse<SavedImage> = {
       success: true,
@@ -133,7 +130,7 @@ router.put('/:id', async (req, res) => {
   try {
     const updateData: UpdateImageRequest = req.body;
     
-    const result = await databaseService.updateImage(req.params.id, updateData);
+    const result = await databaseManager.updateImage(req.params.id, updateData);
 
     const response: ApiResponse<SavedImage> = {
       success: true,
@@ -160,7 +157,7 @@ router.delete('/:id', async (req, res) => {
     const deletedBy = (req as any).user?.userId || 'unknown';
     
     // 先检查图片是否存在
-    const image = await databaseService.getImageById(req.params.id);
+    const image = await databaseManager.getImageById(req.params.id);
     
     if (!image) {
       const response: ApiResponse = {
@@ -246,7 +243,7 @@ router.delete('/', async (req, res) => {
 // 获取图片统计信息
 router.get('/stats/summary', async (req, res) => {
   try {
-    const stats = await databaseService.getImageStatistics();
+    const stats = await databaseManager.getImageStatistics();
 
     const response: ApiResponse = {
       success: true,
@@ -283,7 +280,7 @@ router.patch('/:id/canvas-position', async (req, res) => {
       return res.status(400).json(response);
     }
     
-    const updatedImage = await databaseService.updateImageCanvasPosition(id, canvasX, canvasY);
+    const updatedImage = await databaseManager.updateImageCanvasPosition(id, canvasX, canvasY);
     
     const response: ApiResponse<SavedImage> = {
       success: true,

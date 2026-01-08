@@ -28,6 +28,7 @@ import { imageLoadingManager } from './services/imageLoadingManager';
 import { useCanvasSelection } from './hooks/useCanvasSelection';
 import { SelectionBox } from './components/SelectionBox';
 import { getIntersectingImageIds, normalizeSelectionRect } from './utils/selectionUtils';
+import { downloadImage, generateDownloadFilename } from './utils/downloadUtils';
 import {
   Zap,
   Settings,
@@ -208,6 +209,7 @@ function CanvasApp() {
   const [dragTarget, setDragTarget] = useState<'canvas' | string>('canvas');
   const canvasRef = useRef<HTMLDivElement>(null);
   const canvasContentRef = useRef<HTMLDivElement>(null);  // 画布内容容器 ref（用于 imperative DOM 操作）
+  const gridBackgroundRef = useRef<HTMLDivElement>(null);  // 背景点阵 ref（用于滚轮缩放时同步更新）
   
   // 正在拖拽的图片 ID 集合（用于 will-change 优化）
   const [draggingImageIds, setDraggingImageIds] = useState<Set<string>>(new Set());
@@ -216,6 +218,9 @@ function CanvasApp() {
   const isPanningRef = useRef(false);
   const isZoomingRef = useRef(false);
   const zoomEndTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 是否正在滚轮缩放（用于禁用 CSS transition，实现以鼠标为中心的精确缩放）
+  const [isWheelZooming, setIsWheelZooming] = useState(false);
   
   // 是否显示「定位到最新」按钮（需求 7.3）
   const [showLocateLatest, setShowLocateLatest] = useState(false);
@@ -743,11 +748,10 @@ function CanvasApp() {
   }, [showToast]);
 
   // 滚轮缩放 - 以鼠标位置为中心缩放
-  // 性能优化：交互过程中直接操作 DOM，交互结束后再同步 state
+  // 缩放时禁用 CSS transition，确保鼠标指向的点保持不变
   useEffect(() => {
     const canvasElement = canvasRef.current;
-    const canvasContentElement = canvasContentRef.current;
-    if (!canvasElement || !canvasContentElement) return;
+    if (!canvasElement) return;
 
     const handleWheelZoom = (e: WheelEvent) => {
       e.preventDefault();
@@ -782,24 +786,22 @@ function CanvasApp() {
       scaleRef.current = newScale;
       positionRef.current = { x: newX, y: newY };
       
-      // 直接操作 DOM，避免 React 重渲染
-      canvasContentElement.style.transform = `translate3d(${newX}px, ${newY}px, 0) scale(${newScale})`;
+      // 禁用 CSS transition，确保以鼠标为中心的精确缩放
+      setIsWheelZooming(true);
       
-      // 标记正在缩放
-      isZoomingRef.current = true;
+      // 更新 React state
+      setScale(newScale);
+      setPosition({ x: newX, y: newY });
       
       // 清除之前的定时器
       if (zoomEndTimerRef.current) {
         clearTimeout(zoomEndTimerRef.current);
       }
       
-      // 缩放结束后同步 state（150ms 无操作视为结束）
+      // 缩放结束后恢复 CSS transition（200ms 无操作视为结束）
       zoomEndTimerRef.current = setTimeout(() => {
-        isZoomingRef.current = false;
-        // 同步 state，触发可见图片重新计算
-        setScale(scaleRef.current);
-        setPosition(positionRef.current);
-      }, 150);
+        setIsWheelZooming(false);
+      }, 200);
     };
 
     canvasElement.addEventListener('wheel', handleWheelZoom, { passive: false });
@@ -1043,18 +1045,15 @@ function CanvasApp() {
     if (!isDragging) return;
     
     if (dragTarget === 'canvas') {
-      // 抓手模式下的画布拖动 - 使用 imperative DOM 操作
+      // 抓手模式下的画布拖动 - 直接更新 React state
       const newX = e.clientX - dragStart.x;
       const newY = e.clientY - dragStart.y;
       
       // 更新 ref 中的实时值
       positionRef.current = { x: newX, y: newY };
       
-      // 直接操作 DOM，避免 React 重渲染
-      const canvasContentElement = canvasContentRef.current;
-      if (canvasContentElement) {
-        canvasContentElement.style.transform = `translate3d(${newX}px, ${newY}px, 0) scale(${scaleRef.current})`;
-      }
+      // 直接更新 React state（拖拽时 CSS transition 被禁用，所以不会有延迟）
+      setPosition({ x: newX, y: newY });
     } else if (dragTarget === 'selection') {
       // 框选模式 - 由上面的 selectionBox.isActive 处理
       // 这里不需要额外处理
@@ -1643,7 +1642,7 @@ function CanvasApp() {
 
             <button onClick={() => setShowOSSConfig(true)} className={`btn-glass flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all ${ossConnected ? 'text-emerald-400 border-emerald-500/30' : 'text-zinc-300 hover:text-zinc-100'}`}>
               <Cloud className="w-4 h-4" />
-              <span>云存储</span>
+              <span>存储</span>
               {ossConnected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
             </button>
 
@@ -1715,7 +1714,10 @@ function CanvasApp() {
           )}
           
           {/* 点矩阵背景（缩小时渐渐变透明） */}
-          <div className="absolute inset-0 pointer-events-none transition-opacity duration-150" style={{
+          <div 
+            ref={gridBackgroundRef}
+            className={`grid-background absolute inset-0 pointer-events-none ${!isDragging && !isWheelZooming ? 'with-transition' : ''}`}
+            style={{
             backgroundImage: `radial-gradient(circle, rgba(180, 180, 233, 0.62) 2px, transparent 1px)`,
             backgroundSize: `${gridSize}px ${gridSize}px`,
             backgroundPosition: `${position.x % gridSize}px ${position.y % gridSize}px`,
@@ -1725,7 +1727,7 @@ function CanvasApp() {
           {/* 画布内容 */}
           <div 
             ref={canvasContentRef}
-            className={`canvas-content absolute inset-0 ${!isDragging ? 'with-transition' : ''}`} 
+            className={`canvas-content absolute inset-0 ${!isDragging && !isWheelZooming ? 'with-transition' : ''}`} 
             style={{ 
               transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`, 
               transformOrigin: '0 0',
@@ -1826,66 +1828,10 @@ function CanvasApp() {
                     <ImageIcon className="w-14 h-14 text-zinc-500" />
                   </div>
                   
-                  {/* 标题和描述 */}
-                  <h2 className="text-2xl font-semibold text-zinc-200 mb-3">
+                  {/* 标题 */}
+                  <h2 className="text-2xl font-semibold text-zinc-200">
                     {currentProject?.name ? `「${currentProject.name}」` : '画布'}还没有图片
                   </h2>
-                  <p className="text-zinc-400 mb-8 leading-relaxed">
-                    在左侧输入提示词，点击生成按钮开始创作。<br />
-                    您也可以从图片库导入已有的图片。
-                  </p>
-                  
-                  {/* 快捷操作按钮 */}
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center pointer-events-auto">
-                    {!apiConfig.apiKey ? (
-                      <button 
-                        onClick={() => setShowApiConfig(true)} 
-                        className="btn-primary px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2"
-                      >
-                        <Settings className="w-4 h-4" />
-                        配置 API Key
-                      </button>
-                    ) : (
-                      <>
-                        <button 
-                          onClick={() => {
-                            // 聚焦到提示词输入框
-                            const textarea = document.querySelector('textarea');
-                            if (textarea) {
-                              textarea.focus();
-                            }
-                          }}
-                          className="btn-primary px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2"
-                        >
-                          <Wand2 className="w-4 h-4" />
-                          开始创作
-                        </button>
-                        <button 
-                          onClick={() => setShowImageLibrary(true)}
-                          className="btn-glass px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 text-zinc-300"
-                        >
-                          <FolderOpen className="w-4 h-4" />
-                          从图片库导入
-                        </button>
-                      </>
-                    )}
-                  </div>
-                  
-                  {/* 提示信息 */}
-                  <div className="mt-8 flex items-center justify-center gap-6 text-xs text-zinc-500">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                      <span>支持多种 AI 模型</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                      <span>支持参考图片</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span>自动保存到云端</span>
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
@@ -2015,7 +1961,7 @@ function CanvasApp() {
             {/* 操作按钮 */}
             <div className="flex gap-2 mt-4">
               <button
-                onClick={() => { const link = document.createElement('a'); link.href = showImageDetail.url; link.download = `nano-banana-${showImageDetail.id}.jpg`; link.click(); }}
+                onClick={() => { downloadImage(showImageDetail.url, generateDownloadFilename(showImageDetail.id)); }}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-3 btn-glass rounded-xl text-sm font-medium text-zinc-300"
               >
                 <Download className="w-4 h-4" />
@@ -2039,7 +1985,16 @@ function CanvasApp() {
       <OSSConfigModal isOpen={showOSSConfig} onClose={() => setShowOSSConfig(false)} onConfigSaved={(config) => { setOssConfig(config); setOssConnected(config.enabled); setShowOSSConfig(false); }} />
       
       {/* 回收站弹窗（需求 8.1） */}
-      <TrashBin isOpen={showTrashBin} onClose={() => setShowTrashBin(false)} />
+      <TrashBin 
+        isOpen={showTrashBin} 
+        onClose={() => setShowTrashBin(false)} 
+        onImageRestored={() => {
+          // 刷新当前项目的画布图片
+          if (currentProject?.id) {
+            loadProjectImages(currentProject.id);
+          }
+        }}
+      />
       
       {/* 图片预览模态框 */}
       <ImagePreviewModal
@@ -2048,10 +2003,7 @@ function CanvasApp() {
         onClose={() => setPreviewImage(null)}
         onFavorite={handleFavoriteImage}
         onDownload={(image) => {
-          const link = document.createElement('a');
-          link.href = image.url;
-          link.download = `nano-banana-${image.id}.jpg`;
-          link.click();
+          downloadImage(image.url, generateDownloadFilename(image.id));
         }}
         onShare={(image) => {
           navigator.clipboard.writeText(image.url);
