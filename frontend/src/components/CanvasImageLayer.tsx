@@ -215,61 +215,31 @@ const CanvasImageItem: React.FC<{
       setIsHighResLoaded(true);
     }
 
-    // 定期检查加载状态和 Blob URL 缓存（简单的轮询方式）
-    let checkInterval: NodeJS.Timeout | null = null;
-    
-    // 只有在未加载完成时才需要轮询
-    if (currentState !== 'loaded') {
-      checkInterval = setInterval(() => {
-        const state = imageLoadingManager.getLoadingState(image.id);
-        
-        // 同时检查 Blob URL 是否已经可用
-        // 检查原图和缩略图的 Blob URL
-        const originalBlobUrl = typeof imageLoadingManager.getBlobUrl === 'function' 
-          ? imageLoadingManager.getBlobUrl(image.url) 
-          : null;
-        const thumbnailBlobUrl = image.thumbnailUrl && typeof imageLoadingManager.getBlobUrl === 'function'
-          ? imageLoadingManager.getBlobUrl(image.thumbnailUrl)
-          : null;
-        const hasBlobUrl = !!(originalBlobUrl || thumbnailBlobUrl);
-        
-        setLoadingState(prevState => {
-          // 如果 Blob URL 已可用，强制触发重新渲染
-          if (hasBlobUrl && prevState !== 'loaded') {
-            setBlobCacheVersion(v => v + 1);
-            
-            if (state === 'loaded') {
-              setIsHighResLoaded(true);
-              if (checkInterval) {
-                clearInterval(checkInterval);
-                checkInterval = null;
-              }
-            }
-            return state;
-          }
+    // 使用事件驱动的状态更新，替代轮询
+    // 注册状态变化回调
+    const handleStateChange = (changedImageId: string, newState: LoadingState) => {
+      if (changedImageId !== image.id) return;
+      
+      setLoadingState(prevState => {
+        if (newState !== prevState) {
+          // 状态变化时，触发重新渲染以获取最新的 Blob URL
+          setBlobCacheVersion(v => v + 1);
           
-          if (state !== prevState) {
-            // 状态变化时，触发重新渲染以获取最新的 Blob URL
-            setBlobCacheVersion(v => v + 1);
-            
-            if (state === 'loaded') {
-              setIsHighResLoaded(true);
-              if (checkInterval) {
-                clearInterval(checkInterval);
-                checkInterval = null;
-              }
-            }
-            return state;
+          if (newState === 'loaded') {
+            setIsHighResLoaded(true);
           }
-          return prevState;
-        });
-      }, 100);
-    }
+          return newState;
+        }
+        return prevState;
+      });
+    };
+    
+    // 注册回调到 imageLoadingManager
+    imageLoadingManager.addStateChangeListener(image.id, handleStateChange);
 
     return () => {
-      if (checkInterval) {
-        clearInterval(checkInterval);
-      }
+      // 移除回调
+      imageLoadingManager.removeStateChangeListener(image.id);
       // 组件卸载时通知离开视口（但不清除缓存）
       imageLoadingManager.imageLeftViewport(image.id);
     };

@@ -63,6 +63,9 @@ export class ImageLoadingManager {
   // 状态变化回调
   private onStateChange: StateChangeCallback | null = null;
   
+  // 每个图片的状态变化监听器（用于组件级别的事件驱动更新）
+  private stateChangeListeners: Map<string, StateChangeCallback> = new Map();
+  
   // 延迟加载定时器
   private delayTimers: Map<string, NodeJS.Timeout> = new Map();
   
@@ -116,6 +119,25 @@ export class ImageLoadingManager {
    */
   setSourceChangeCallback(callback: (imageId: string, sourceType: ImageSourceType) => void): void {
     this.onSourceChange = callback;
+  }
+
+  /**
+   * 添加状态变化监听器（用于组件级别的事件驱动更新）
+   * 
+   * @param imageId 图片 ID
+   * @param callback 状态变化回调
+   */
+  addStateChangeListener(imageId: string, callback: StateChangeCallback): void {
+    this.stateChangeListeners.set(imageId, callback);
+  }
+
+  /**
+   * 移除状态变化监听器
+   * 
+   * @param imageId 图片 ID
+   */
+  removeStateChangeListener(imageId: string): void {
+    this.stateChangeListeners.delete(imageId);
   }
 
   /**
@@ -583,6 +605,9 @@ export class ImageLoadingManager {
     // 清除正在加载的 URL 集合
     this.loadingUrls.clear();
     
+    // 清除状态变化监听器
+    this.stateChangeListeners.clear();
+    
     // 重置图片序号
     this.imageIndexMap.clear();
     this.nextImageIndex = 1;
@@ -877,8 +902,15 @@ export class ImageLoadingManager {
    * 通知状态变化
    */
   private notifyStateChange(imageId: string, state: LoadingState): void {
+    // 通知全局回调
     if (this.onStateChange) {
       this.onStateChange(imageId, state);
+    }
+    
+    // 通知组件级别的监听器（事件驱动更新）
+    const listener = this.stateChangeListeners.get(imageId);
+    if (listener) {
+      listener(imageId, state);
     }
   }
 
