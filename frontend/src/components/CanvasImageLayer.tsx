@@ -117,8 +117,6 @@ export const shouldShowRegenerateButton = (image: CanvasImage): boolean => {
 interface SelectionCornersProps {
   isSelected: boolean;           // 是否被选中
   imageType: ImageType;          // 图片类型
-  width: number;                 // 图片宽度
-  height: number;                // 图片高度
 }
 
 /**
@@ -130,8 +128,6 @@ interface SelectionCornersProps {
 const SelectionCorners: React.FC<SelectionCornersProps> = ({
   isSelected,
   imageType,
-  width,
-  height,
 }) => {
   // 动画状态：entering（进入）、visible（可见）、exiting（退出）、hidden（隐藏）
   const [animationState, setAnimationState] = useState<'entering' | 'visible' | 'exiting' | 'hidden'>(
@@ -597,6 +593,9 @@ const CanvasImageItem: React.FC<{
   const displayActualWidth = Math.round(actualWidth);
   const displayActualHeight = Math.round(actualHeight);
 
+  // 悬浮状态 - 用于显示尺寸标签和操作工具栏
+  const [isHovered, setIsHovered] = useState(false);
+
   // 加载状态
   const [loadingState, setLoadingState] = useState<LoadingState>(
     image.loadingState || 'placeholder'
@@ -747,6 +746,9 @@ const CanvasImageItem: React.FC<{
   // 获取图片类型用于四角指示器颜色
   const imageType = getImageType(image);
 
+  // 判断是否显示 UI（悬浮或选中时显示）
+  const shouldShowUI = isHovered || isSelected;
+
   return (
     <div
       className={`absolute cursor-move group ${isDragging ? 'dragging' : ''}`}
@@ -757,8 +759,12 @@ const CanvasImageItem: React.FC<{
         width: imgWidth,
         height: imgHeight,
         willChange: isDragging ? 'transform' : 'auto',
+        // 选中或悬浮的图片提升 z-index，确保操作栏不被其他图片遮挡
+        zIndex: shouldShowUI ? 100 : 'auto',
       }}
       onMouseDown={onMouseDown}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onDoubleClick={(e) => {
         e.stopPropagation();
         handleDoubleClick();
@@ -768,25 +774,29 @@ const CanvasImageItem: React.FC<{
       <SelectionCorners
         isSelected={isSelected}
         imageType={imageType}
-        width={imgWidth}
-        height={imgHeight}
       />
       
-      {/* 选中状态 UI 容器 - 尺寸标签和操作工具栏 */}
-      {isSelected && (
-        <div className="selection-ui-container">
+      {/* 悬浮/选中状态 UI 容器 - 尺寸标签和操作工具栏 */}
+      {shouldShowUI && (
+        <div 
+          className="selection-ui-container"
+          onMouseDown={(e) => {
+            // 阻止事件冒泡，防止触发图片的拖拽
+            e.stopPropagation();
+          }}
+        >
           {/* 尺寸标签 - 左侧 */}
           <DimensionBadge
             width={displayActualWidth}
             height={displayActualHeight}
-            isVisible={isSelected}
+            isVisible={shouldShowUI}
             isDragging={isDragging}
           />
           
           {/* 操作工具栏 - 右侧 */}
           <ActionToolbar
             image={image}
-            isVisible={isSelected}
+            isVisible={shouldShowUI}
             isDragging={isDragging}
             onEdit={onEdit}
             onAddAsReference={onAddAsReference}

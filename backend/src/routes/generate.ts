@@ -46,18 +46,29 @@ router.post('/', async (req, res) => {
       return res.status(400).json(response);
     }
 
-    // 处理参考图片：上传到 OSS 并获取 URL
+    // 处理参考图片：根据存储模式决定处理方式
+    // - OSS 模式：上传到 OSS 并获取公网可访问的 URL
+    // - 本地模式：直接使用 Base64（因为本地 URL 无法被第三方 API 访问）
     let refImageUrls: string[] | undefined;
     if (request.refImages && request.refImages.length > 0) {
-      try {
-        console.log(`处理 ${request.refImages.length} 张参考图片...`);
-        const uploadResults = await referenceImageService.uploadRefImages(request.refImages);
-        refImageUrls = uploadResults.map(r => r.ossUrl);
-        console.log(`参考图片处理完成，获取到 ${refImageUrls.length} 个 OSS URL`);
-      } catch (uploadError: any) {
-        console.warn('参考图片上传失败，使用原始 Base64:', uploadError.message);
-        // 如果上传失败，回退到使用原始 Base64
+      const storageMode = storageManager.getMode();
+      
+      if (storageMode === 'local') {
+        // 本地模式：直接使用 Base64 数据传给 AI API
+        console.log(`本地模式：直接使用 ${request.refImages.length} 张参考图的 Base64 数据`);
         refImageUrls = request.refImages;
+      } else {
+        // OSS 模式：上传到 OSS 获取公网 URL
+        try {
+          console.log(`OSS 模式：上传 ${request.refImages.length} 张参考图片...`);
+          const uploadResults = await referenceImageService.uploadRefImages(request.refImages);
+          refImageUrls = uploadResults.map(r => r.ossUrl);
+          console.log(`参考图片处理完成，获取到 ${refImageUrls.length} 个 OSS URL`);
+        } catch (uploadError: any) {
+          console.warn('参考图片上传失败，使用原始 Base64:', uploadError.message);
+          // 如果上传失败，回退到使用原始 Base64
+          refImageUrls = request.refImages;
+        }
       }
     }
 

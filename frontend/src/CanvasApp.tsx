@@ -757,6 +757,8 @@ function CanvasApp() {
   
   // 拖拽上传状态
   const [isDragOver, setIsDragOver] = useState(false);
+  // 拖拽计数器（用于处理嵌套元素的拖拽事件）
+  const dragCounterRef = useRef(0);
 
   /**
    * 处理上传图片到画布
@@ -934,6 +936,7 @@ function CanvasApp() {
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    dragCounterRef.current++;
     // 检查是否包含文件
     if (e.dataTransfer.types.includes('Files')) {
       setIsDragOver(true);
@@ -946,13 +949,10 @@ function CanvasApp() {
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // 只有当离开画布区域时才取消拖拽状态
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      const { clientX, clientY } = e;
-      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-        setIsDragOver(false);
-      }
+    dragCounterRef.current--;
+    // 只有当计数器归零时才取消拖拽状态（处理嵌套元素的情况）
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false);
     }
   }, []);
 
@@ -970,6 +970,8 @@ function CanvasApp() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // 重置计数器和状态
+    dragCounterRef.current = 0;
     setIsDragOver(false);
     
     const files = e.dataTransfer.files;
@@ -2427,11 +2429,13 @@ function CanvasApp() {
             onChange={handleFileSelect}
           />
           
-          {/* 拖拽上传遮罩 */}
+          {/* 拖拽上传遮罩 - 居中显示，占据 50% 画面 */}
           {isDragOver && (
-            <div className="absolute inset-0 z-50 bg-violet-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-              <div className="glass-card px-8 py-6 rounded-2xl border-2 border-dashed border-violet-500/50">
-                <p className="text-lg text-violet-400 font-medium">释放以上传图片</p>
+            <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <div className="w-1/2 h-1/2 max-w-lg max-h-80 bg-violet-500/10 backdrop-blur-sm rounded-3xl border-2 border-dashed border-violet-500/50 flex items-center justify-center">
+                <div className="glass-card px-8 py-6 rounded-2xl">
+                  <p className="text-lg text-violet-400 font-medium">释放以上传图片</p>
+                </div>
               </div>
             </div>
           )}

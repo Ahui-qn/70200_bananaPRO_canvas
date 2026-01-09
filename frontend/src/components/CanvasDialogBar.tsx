@@ -376,10 +376,10 @@ export const RefImagePreview: React.FC<RefImagePreviewProps> = ({
         pointerEvents: 'auto',
       }}
     >
-      {/* 横向滚动容器 */}
+      {/* 横向滚动容器 - 添加 padding 以容纳超出边界的删除按钮 */}
       <div
         ref={scrollContainerRef}
-        className="flex gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent pb-1"
+        className="flex gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent pt-2 pr-2 pb-1"
         style={{
           scrollbarWidth: 'thin',
           msOverflowStyle: 'none',
@@ -770,15 +770,6 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* 拖拽提示区域 */}
-      {isDragOver && (
-        <div className="absolute inset-0 -top-20 flex items-center justify-center pointer-events-none z-50">
-          <div className="px-6 py-4 rounded-2xl bg-violet-500/20 border-2 border-dashed border-violet-500/50 backdrop-blur-sm">
-            <p className="text-violet-300 text-sm font-medium">释放以添加参考图</p>
-          </div>
-        </div>
-      )}
-
       {/* 参考图预览区域 - 显示在对话框上方，与对话框左对齐 */}
       <div className="pl-14"> {/* 与模式切换按钮宽度 + gap 对齐 */}
         <RefImagePreview
@@ -800,8 +791,18 @@ export const CanvasDialogBar: React.FC<CanvasDialogBarProps> = ({
         />
 
         {/* 中间：主输入框容器（玻璃化）- 向上扩展高度 */}
-        <div className={`flex-1 glass-dialog rounded-3xl px-2 py-1.5 flex flex-col transition-all duration-300 
+        <div className={`flex-1 glass-dialog rounded-3xl px-2 py-1.5 flex flex-col transition-all duration-300 relative
           ${isDragOver ? 'ring-2 ring-violet-500/50 bg-violet-500/10' : ''}`}>
+          
+          {/* 拖拽提示区域 - 显示在输入框内部 */}
+          {isDragOver && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 rounded-3xl backdrop-blur-sm bg-zinc-900/40">
+              <div className="px-5 py-2.5 rounded-xl bg-violet-500/30 border border-dashed border-violet-400/60">
+                <p className="text-violet-200 text-sm font-medium">释放以添加参考图</p>
+              </div>
+            </div>
+          )}
+          
           {/* 提示词输入框 - 自动调整高度，向上扩展 */}
           <div className="flex-1 relative">
             <textarea
