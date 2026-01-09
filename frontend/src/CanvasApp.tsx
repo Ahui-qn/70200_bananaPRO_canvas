@@ -395,23 +395,54 @@ function CanvasApp() {
       // 优先使用运行时位置（x/y），因为它可能被用户拖动更新
       const imgX = (latestImage as any).x ?? latestImage.canvasX ?? 0;
       const imgY = (latestImage as any).y ?? latestImage.canvasY ?? 0;
-      const imgWidth = latestImage.width || 400;
-      const imgHeight = latestImage.height || 400;
+      
+      // 获取实际像素尺寸
+      const actualWidth = latestImage.width || 400;
+      const actualHeight = latestImage.height || 400;
+      
+      // 计算画布显示尺寸（与 CanvasImageLayer 中的逻辑一致）
+      // 最大显示尺寸为 400px，保持宽高比
+      const maxSize = 400;
+      let imgWidth: number;
+      let imgHeight: number;
+      
+      if (actualWidth <= maxSize && actualHeight <= maxSize) {
+        imgWidth = actualWidth;
+        imgHeight = actualHeight;
+      } else {
+        const aspectRatio = actualWidth / actualHeight;
+        if (aspectRatio > 1) {
+          imgWidth = Math.min(actualWidth, maxSize);
+          imgHeight = imgWidth / aspectRatio;
+        } else {
+          imgHeight = Math.min(actualHeight, maxSize);
+          imgWidth = imgHeight * aspectRatio;
+        }
+      }
 
       // 计算将图片居中显示的位置
       const canvasElement = canvasRef.current;
       if (canvasElement) {
         const rect = canvasElement.getBoundingClientRect();
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
+        const viewportWidth = rect.width;
+        const viewportHeight = rect.height;
 
-        // 使用动画平滑滚动（需求 7.4）
-        const targetX = centerX - (imgX + imgWidth / 2) * scale;
-        const targetY = centerY - (imgY + imgHeight / 2) * scale;
+        // 目标缩放比例为 100%
+        const targetScale = 1;
+        
+        // 计算图片中心点（使用画布显示尺寸）
+        const imageCenterX = imgX + imgWidth / 2;
+        const imageCenterY = imgY + imgHeight / 2;
+        
+        // 计算将图片中心放到视口中心的位置
+        // 公式：targetX = viewportCenter - imageCenterInCanvas * scale
+        const targetX = viewportWidth / 2 - imageCenterX * targetScale;
+        const targetY = viewportHeight / 2 - imageCenterY * targetScale;
 
-        // 平滑动画
-        const startX = position.x;
-        const startY = position.y;
+        // 使用 ref 获取当前最新值，避免闭包问题
+        const startX = positionRef.current.x;
+        const startY = positionRef.current.y;
+        const startScale = scaleRef.current;
         const duration = 300;
         const startTime = Date.now();
 
@@ -423,20 +454,27 @@ function CanvasApp() {
 
           const newX = startX + (targetX - startX) * easeProgress;
           const newY = startY + (targetY - startY) * easeProgress;
+          const newScale = startScale + (targetScale - startScale) * easeProgress;
 
           setPosition({ x: newX, y: newY });
+          setScale(newScale);
 
           if (progress < 1) {
             requestAnimationFrame(animate);
           } else {
             setShowLocateLatest(false);
+            // 动画完成后自动选中最新图片
+            setSelectedImageId(latestImage.id);
+            // 清除多选状态，只选中最新图片
+            selectionActions.clearSelection();
+            selectionActions.selectImage(latestImage.id);
           }
         };
 
         requestAnimationFrame(animate);
       }
     }
-  }, [persistedImages, scale, position]);
+  }, [persistedImages, selectionActions]);
 
   /**
    * 双击图片显示预览模态框
