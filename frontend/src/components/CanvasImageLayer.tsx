@@ -378,7 +378,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="编辑图片"
         >
-          <Pencil className="w-3.5 h-3.5" />
+          <Pencil className="w-4 h-4" />
         </button>
       )}
       
@@ -392,7 +392,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="添加为参考图"
         >
-          <ImagePlus className="w-3.5 h-3.5" />
+          <ImagePlus className="w-4 h-4" />
         </button>
       )}
       
@@ -406,7 +406,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="重新生成"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
+          <RefreshCw className="w-4 h-4" />
         </button>
       )}
       
@@ -420,7 +420,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="收藏"
         >
-          <Heart className={`w-3.5 h-3.5 ${image.favorite ? 'fill-current' : ''}`} />
+          <Heart className={`w-4 h-4 ${image.favorite ? 'fill-current' : ''}`} />
         </button>
       )}
       
@@ -434,7 +434,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="下载"
         >
-          <Download className="w-3.5 h-3.5" />
+          <Download className="w-4 h-4" />
         </button>
       )}
       
@@ -448,7 +448,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="分享"
         >
-          <Share2 className="w-3.5 h-3.5" />
+          <Share2 className="w-4 h-4" />
         </button>
       )}
       
@@ -462,7 +462,7 @@ const ActionToolbar: React.FC<ActionToolbarProps> = ({
           }}
           title="删除"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-4 h-4" />
         </button>
       )}
     </div>
@@ -833,7 +833,7 @@ const CanvasImageItem: React.FC<{
                 }}
                 title="重新生成"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-violet-400" />
+                <RefreshCw className="w-4 h-4 text-violet-400" />
               </button>
             )}
             <button
@@ -844,7 +844,7 @@ const CanvasImageItem: React.FC<{
               }}
               title="删除"
             >
-              <X className="w-3.5 h-3.5 text-zinc-300" />
+              <X className="w-4 h-4 text-zinc-300" />
             </button>
           </div>
         </div>

@@ -46,6 +46,8 @@ import {
   LogOut,
   User,
   Crosshair,
+  Upload,
+  Trash2,
 } from 'lucide-react';
 
 // 画布图片类型（本地使用，与共享类型兼容）
@@ -2388,6 +2390,37 @@ function CanvasApp() {
               <span>定位到最新</span>
             </button>
           )}
+
+          {/* 左下角工具按钮组 */}
+          <div className="absolute bottom-6 left-6 flex flex-col gap-3 z-40">
+            {/* 上传图片按钮 */}
+            <button
+              onClick={handleUploadButtonClick}
+              disabled={isUploading}
+              className="w-12 h-12 rounded-full bg-zinc-800/90 border border-zinc-700/50 flex items-center justify-center text-zinc-300 hover:text-blue-400 hover:border-blue-500/50 hover:bg-zinc-700/90 transition-all shadow-lg disabled:opacity-50"
+              title="上传图片到画布"
+            >
+              <Upload className="w-5 h-5" />
+            </button>
+
+            {/* 图片库按钮 */}
+            <button
+              onClick={() => setShowImageLibrary(true)}
+              className="w-12 h-12 rounded-full bg-zinc-800/90 border border-zinc-700/50 flex items-center justify-center text-zinc-300 hover:text-violet-400 hover:border-violet-500/50 hover:bg-zinc-700/90 transition-all shadow-lg"
+              title="打开图片库"
+            >
+              <ImageIcon className="w-5 h-5" />
+            </button>
+
+            {/* 回收站按钮 */}
+            <button
+              onClick={() => setShowTrashBin(true)}
+              className="w-12 h-12 rounded-full bg-zinc-800/90 border border-zinc-700/50 flex items-center justify-center text-zinc-300 hover:text-orange-400 hover:border-orange-500/50 hover:bg-zinc-700/90 transition-all shadow-lg"
+              title="打开回收站"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          </div>
           
           {/* 画布渐晕效果 - 边缘变暗，营造聚光灯效果 */}
           <div className="canvas-vignette" />
