@@ -520,6 +520,8 @@ export const EditorCanvas = forwardRef<EditorCanvasRef, EditorCanvasProps>(
             strokeWidth: strokeWidth,
             selectable: false,
             evented: false,
+            originX: 'left',  // 使用左上角作为原点
+            originY: 'top',
           });
         } else if (currentTool === 'circle') {
           currentShapeRef.current = new Ellipse({
@@ -532,6 +534,8 @@ export const EditorCanvas = forwardRef<EditorCanvasRef, EditorCanvasProps>(
             strokeWidth: strokeWidth,
             selectable: false,
             evented: false,
+            originX: 'left',  // 使用左上角作为原点
+            originY: 'top',
           });
         }
 
@@ -553,22 +557,30 @@ export const EditorCanvas = forwardRef<EditorCanvasRef, EditorCanvasProps>(
 
         if (currentTool === 'rect') {
           const rect = currentShapeRef.current as Rect;
+          // 支持任意方向拖动
+          const left = Math.min(startX, pointer.x);
+          const top = Math.min(startY, pointer.y);
+          const w = Math.abs(pointer.x - startX);
+          const h = Math.abs(pointer.y - startY);
           rect.set({
-            left: startX,
-            top: startY,
-            width: Math.max(0, width),
-            height: Math.max(0, height),
+            left,
+            top,
+            width: w,
+            height: h,
           });
         } else if (currentTool === 'circle') {
           const ellipse = currentShapeRef.current as Ellipse;
-          // 椭圆的 rx/ry 是半径，所以除以2
-          const rx = Math.max(0, width) / 2;
-          const ry = Math.max(0, height) / 2;
+          // 使用 originX/Y: 'left'/'top' 后，rx/ry 就是宽高的一半
+          // 但绘制时需要支持任意方向拖动
+          const left = Math.min(startX, pointer.x);
+          const top = Math.min(startY, pointer.y);
+          const w = Math.abs(pointer.x - startX);
+          const h = Math.abs(pointer.y - startY);
           ellipse.set({
-            left: startX,
-            top: startY,
-            rx,
-            ry,
+            left,
+            top,
+            rx: w / 2,
+            ry: h / 2,
           });
         }
 
