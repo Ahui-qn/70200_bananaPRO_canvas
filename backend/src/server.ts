@@ -14,6 +14,7 @@ import authRouter from './routes/auth.js';
 import projectsRouter from './routes/projects.js';
 import trashRouter from './routes/trash.js';
 import staticImagesRouter from './routes/staticImages.js';
+import backupRouter from './routes/backup.js';
 
 // 导入中间件
 import { authMiddleware } from './middleware/auth.js';
@@ -22,6 +23,7 @@ import { authMiddleware } from './middleware/auth.js';
 import { storageManager } from './services/storageManager.js';
 import { databaseService } from './services/databaseService.js';
 import { databaseManager } from './services/databaseManager.js';
+import { databaseBackupService } from './services/databaseBackupService.js';
 
 // 加载环境变量
 dotenv.config();
@@ -148,6 +150,7 @@ app.use('/api/generate', authMiddleware, generateRouter);
 app.use('/api/ref-images', authMiddleware, refImagesRouter);
 app.use('/api/projects', authMiddleware, projectsRouter);
 app.use('/api/trash', authMiddleware, trashRouter);
+app.use('/api/backup', authMiddleware, backupRouter);
 
 // 错误处理中间件
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -174,6 +177,13 @@ app.use('*', (req, res) => {
 const startServer = async () => {
   // 初始化数据库连接
   const dbConnected = await initializeDatabase();
+  
+  // 初始化数据库备份服务（仅 SQLite 模式且本地存储模式）
+  const databaseMode = process.env.DATABASE_MODE?.toLowerCase();
+  const storageMode = process.env.STORAGE_MODE?.toLowerCase();
+  if (databaseMode === 'sqlite' && storageMode === 'local' && dbConnected) {
+    await databaseBackupService.initialize();
+  }
   
   // 获取监听地址
   const host = process.env.HOST || 'localhost';

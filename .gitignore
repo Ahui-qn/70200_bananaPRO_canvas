@@ -47,3 +47,8 @@ frontend/.env
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# SQLite 数据库文件
+backend/data/*.sqlite
+backend/data/*.sqlite-shm
+backend/data/*.sqlite-wal
