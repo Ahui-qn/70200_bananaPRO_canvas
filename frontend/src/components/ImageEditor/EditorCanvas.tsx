@@ -532,8 +532,6 @@ export const EditorCanvas = forwardRef<EditorCanvasRef, EditorCanvasProps>(
             strokeWidth: strokeWidth,
             selectable: false,
             evented: false,
-            originX: 'center',
-            originY: 'center',
           });
         }
 
@@ -549,33 +547,26 @@ export const EditorCanvas = forwardRef<EditorCanvasRef, EditorCanvasProps>(
         const startX = startPointRef.current.x;
         const startY = startPointRef.current.y;
 
-        // 计算宽高 - 支持任意方向拖拽
+        // 计算宽高 - 始终从起点向右下方向扩展
         const width = pointer.x - startX;
         const height = pointer.y - startY;
-
-        // 计算实际的左上角位置（支持反向拖拽）
-        const left = width >= 0 ? startX : pointer.x;
-        const top = height >= 0 ? startY : pointer.y;
-        const absWidth = Math.abs(width);
-        const absHeight = Math.abs(height);
 
         if (currentTool === 'rect') {
           const rect = currentShapeRef.current as Rect;
           rect.set({
-            left,
-            top,
-            width: absWidth,
-            height: absHeight,
+            left: startX,
+            top: startY,
+            width: Math.max(0, width),
+            height: Math.max(0, height),
           });
         } else if (currentTool === 'circle') {
           const ellipse = currentShapeRef.current as Ellipse;
-          // 椭圆的 rx/ry 是半径
-          const rx = absWidth / 2;
-          const ry = absHeight / 2;
-          // 椭圆的 left/top 是中心点位置，需要加上半径偏移
+          // 椭圆的 rx/ry 是半径，所以除以2
+          const rx = Math.max(0, width) / 2;
+          const ry = Math.max(0, height) / 2;
           ellipse.set({
-            left: left + rx,
-            top: top + ry,
+            left: startX,
+            top: startY,
             rx,
             ry,
           });
